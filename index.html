@@ -1,0 +1,2631 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline' 'unsafe-eval' https://dapi.kakao.com https://*.daumcdn.net https://*.kakao.com;
+        style-src 'self' 'unsafe-inline';
+        img-src 'self' data: blob: https:;
+        connect-src 'self' https://dapi.kakao.com https://*.kakao.com https://apis-navigator.kakaomobility.com https://api.jsonbin.io https://api.open-meteo.com https://*.daumcdn.net ws://127.0.0.1:* ws://localhost:* ws: wss:;
+        font-src 'self' data: https:;
+        worker-src 'self' blob:;
+    ">
+    
+    <title>濟州島自駕行程管理系統 (整合 Kakao Map)</title>
+    <style>
+        /* ===== Design Tokens ===== */
+        :root {
+            /* 色彩系統 */
+            --page-bg: #F5F5F7;
+            --card-bg: #FFFFFF;
+
+            /* 雙層柔和陰影（取代 border） */
+            --shadow-soft: 0 2px 4px rgba(0,0,0,0.02), 0 10px 40px rgba(0,0,0,0.06);
+            --shadow-elevated: 0 8px 16px rgba(0,0,0,0.04), 0 24px 80px rgba(0,0,0,0.1);
+
+            /* 巢狀圓角系統 */
+            --radius-lg: 20px;
+            --radius-md: 10px;
+
+            /* 強調色 */
+            --accent: #007AFF;
+            --accent-green: #34C759;
+            --accent-orange: #FF9500;
+            --accent-red: #FF3B30;
+            --accent-indigo: #5856D6;
+
+            /* 文字 */
+            --text-primary: rgba(0,0,0,0.88);
+            --text-secondary: rgba(0,0,0,0.52);
+            --text-tertiary: rgba(0,0,0,0.3);
+            --separator: rgba(0,0,0,0.06);
+
+            /* 動畫 */
+            --ease: cubic-bezier(0.4, 0, 0.2, 1);
+            --duration: 0.3s;
+            --btn-scale: 1.03;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, 'SF Pro Display', 'PingFang TC', 'Microsoft JhengHei', 'Helvetica Neue', sans-serif;
+            min-height: 100vh; padding: 24px;
+            background: var(--page-bg);
+            color: var(--text-primary);
+            letter-spacing: -0.015em;
+            -webkit-font-smoothing: antialiased;
+        }
+        .container { max-width: 820px; margin: 0 auto; }
+
+        /* ===== 頂部控制面板 ===== */
+        .control-panel {
+            background: var(--card-bg);
+            padding: 32px 28px 28px; border-radius: var(--radius-lg);
+            margin-bottom: 28px; text-align: center;
+            box-shadow: var(--shadow-soft);
+        }
+        .control-panel h2 {
+            font-size: 1.7em; font-weight: 700; letter-spacing: -0.02em;
+            color: var(--text-primary); margin-bottom: 6px;
+        }
+        .control-panel p {
+            color: var(--text-secondary); font-size: 0.9em;
+            margin-bottom: 18px; font-weight: 400;
+        }
+        .control-panel button {
+            margin: 5px; padding: 10px 24px; border: none; border-radius: 980px;
+            cursor: pointer; font-size: 0.88em; font-weight: 600;
+            transition: all var(--duration) var(--ease);
+            letter-spacing: 0.2px;
+        }
+        .control-panel button:active { transform: scale(0.97); opacity: 0.8; }
+        .btn-export {
+            background: rgba(52,199,89,0.1); color: #1a8f3f;
+        }
+        .btn-export:hover { background: rgba(52,199,89,0.2); transform: scale(var(--btn-scale)); }
+        .btn-import {
+            background: rgba(255,149,0,0.1); color: #b36800;
+        }
+        .btn-import:hover { background: rgba(255,149,0,0.2); transform: scale(var(--btn-scale)); }
+        .btn-add-top {
+            background: rgba(0,122,255,0.1); color: #0060cc;
+        }
+        .btn-add-top:hover { background: rgba(0,122,255,0.18); transform: scale(var(--btn-scale)); }
+
+        /* ===== 更多工具下拉選單 ===== */
+        .dropdown { position: relative; display: inline-block; }
+        .dropdown-toggle {
+            margin: 5px; padding: 10px 24px; border: none; border-radius: 980px;
+            cursor: pointer; font-size: 0.88em; font-weight: 600;
+            transition: all var(--duration) var(--ease);
+            letter-spacing: 0.2px;
+            background: rgba(0,0,0,0.05); color: var(--text-secondary);
+        }
+        .dropdown-toggle:hover { background: rgba(0,0,0,0.09); transform: scale(var(--btn-scale)); }
+        .dropdown-toggle:active { transform: scale(0.97); opacity: 0.8; }
+        .dropdown-menu {
+            display: none; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+            background: var(--card-bg); border-radius: var(--radius-md);
+            box-shadow: var(--shadow-elevated); min-width: 180px; z-index: 100;
+            padding: 6px 0; margin-top: 6px;
+            animation: modalIn 0.2s var(--ease);
+        }
+        .dropdown-menu.open { display: block; }
+        .dropdown-menu button {
+            display: block; width: 100%; padding: 10px 18px; border: none;
+            background: none; cursor: pointer; font-size: 0.88em; font-weight: 500;
+            color: var(--text-primary); text-align: left; font-family: inherit;
+            transition: background var(--duration) var(--ease);
+        }
+        .dropdown-menu button:hover { background: rgba(0,0,0,0.04); }
+        .dropdown-menu button:active { background: rgba(0,0,0,0.08); }
+
+        /* ===== 天數分組 ===== */
+        .day-group {
+            margin-bottom: 20px; border-radius: var(--radius-lg); overflow: hidden;
+            background: var(--card-bg);
+            box-shadow: var(--shadow-soft);
+        }
+        .day-header {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+            color: var(--text-primary); padding: 14px 20px;
+            font-size: 1.05em; font-weight: 700; letter-spacing: -0.02em;
+            display: flex; justify-content: space-between; align-items: center;
+            position: sticky; top: 0; z-index: 10;
+        }
+        .day-header-actions { display: flex; gap: 6px; }
+        .day-header button {
+            background: rgba(0,0,0,0.04); color: var(--text-secondary);
+            border: none; padding: 5px 14px;
+            border-radius: 980px; cursor: pointer; font-size: 0.78em; font-weight: 600;
+            transition: all var(--duration) var(--ease);
+        }
+        .day-header button:hover { background: rgba(0,0,0,0.08); color: var(--text-primary); transform: scale(var(--btn-scale)); }
+        .day-header button:active { transform: scale(0.97); opacity: 0.8; }
+
+        /* ===== 時間軸線條 ===== */
+        .day-group .day-body { position: relative; padding-left: 32px; }
+        .day-body::before {
+            content: ''; position: absolute; left: 38px; top: 0; bottom: 0;
+            width: 2px; background: var(--separator);
+        }
+
+        /* ===== 行程卡片 ===== */
+        .event-card {
+            border-bottom: 1px solid var(--separator);
+            padding: 14px 20px 14px 28px; display: flex; align-items: center;
+            transition: all 0.3s var(--ease);
+            position: relative; z-index: 1;
+        }
+        .event-card:hover {
+            background: var(--card-bg); border-radius: var(--radius-md);
+            transform: translateY(-3px) scale(1.008); z-index: 10;
+            box-shadow: 0 12px 24px rgba(0,0,0,0.08), 0 4px 8px rgba(0,0,0,0.04);
+            border-bottom-color: transparent;
+        }
+        .event-card:last-child { border-bottom: none; }
+
+        /* scroll-reveal 動畫 */
+        .event-card { opacity: 0; transform: translateX(-12px); }
+        .event-card.revealed { opacity: 1; transform: translateX(0); }
+
+        .time {
+            width: 70px; font-weight: 800; color: var(--text-primary);
+            flex-shrink: 0; font-size: 1.3em; letter-spacing: -0.04em;
+            font-variant-numeric: tabular-nums; font-feature-settings: "tnum";
+            text-align: left; position: relative; z-index: 1; margin-top: -2px;
+        }
+        .content { flex-grow: 1; min-width: 0; }
+        .location {
+            font-size: 1em; font-weight: 600; color: var(--accent);
+            cursor: pointer; display: inline; border-bottom: none;
+            transition: color var(--duration) var(--ease); text-decoration: none;
+        }
+        .location:hover { color: var(--accent-orange); }
+        .location::after { content: ' 📍'; font-size: 0.8em; }
+        .desc {
+            font-size: 0.84em; color: var(--text-secondary);
+            margin-top: 2px; line-height: 1.45;
+        }
+        .drive {
+            display: inline-block; margin-top: 5px; font-size: 0.75em;
+            background: rgba(52,199,89,0.08); color: #1a8f3f;
+            padding: 3px 10px; border-radius: 980px;
+        }
+
+        /* ===== 餐食行程卡片 ===== */
+        .event-card.meal-breakfast {
+            background: rgba(255,149,0,0.04);
+            border-left: 3px solid var(--accent-orange);
+        }
+        .event-card.meal-breakfast:hover { background: rgba(255,149,0,0.08); }
+        .event-card.meal-lunch {
+            background: rgba(52,199,89,0.04);
+            border-left: 3px solid var(--accent-green);
+        }
+        .event-card.meal-lunch:hover { background: rgba(52,199,89,0.08); }
+        .event-card.meal-dinner {
+            background: rgba(88,86,214,0.04);
+            border-left: 3px solid var(--accent-indigo);
+        }
+        .event-card.meal-dinner:hover { background: rgba(88,86,214,0.08); }
+        .meal-tag {
+            display: inline-block; font-size: 0.72em; font-weight: 600;
+            padding: 2px 8px; border-radius: 980px; margin-left: 6px;
+            vertical-align: middle;
+        }
+        .meal-tag-breakfast { background: rgba(255,149,0,0.1); color: #b36800; }
+        .meal-tag-lunch { background: rgba(52,199,89,0.1); color: #1a8f3f; }
+        .meal-tag-dinner { background: rgba(88,86,214,0.1); color: #4240a8; }
+
+        /* ===== 天氣標籤 ===== */
+        .weather {
+            display: inline-flex; align-items: center; gap: 6px;
+            margin-top: 5px; font-size: 0.75em;
+            background: rgba(0,122,255,0.06); color: var(--accent);
+            padding: 3px 10px; border-radius: 980px;
+            margin-left: 4px;
+        }
+        .weather-icon { font-size: 1.15em; }
+
+        /* ===== 編輯/刪除按鈕 ===== */
+        .event-actions { flex-shrink: 0; margin-left: 10px; display: flex; flex-direction: row; gap: 6px; }
+        .event-actions button {
+            border: none; border-radius: 980px; padding: 10px 24px;
+            cursor: pointer; font-size: 0.88em; font-weight: 600;
+            transition: all var(--duration) var(--ease);
+            letter-spacing: 0.2px;
+        }
+        .event-actions button:active { transform: scale(0.97); opacity: 0.8; }
+        .btn-edit {
+            background: rgba(0,122,255,0.08); color: #0062cc;
+        }
+        .btn-edit:hover { background: rgba(0,122,255,0.16); transform: scale(var(--btn-scale)); }
+        .btn-delete {
+            background: rgba(255,59,48,0.06); color: #cc2d26;
+        }
+        .btn-delete:hover { background: rgba(255,59,48,0.14); transform: scale(var(--btn-scale)); }
+
+        /* ===== Modal 共用 ===== */
+        .modal {
+            display: none; position: fixed; z-index: 1000; left: 0; top: 0;
+            width: 100%; height: 100%; overflow: auto;
+            background-color: rgba(0,0,0,0.15);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+        }
+        .modal-content {
+            background: var(--card-bg);
+            margin: 5% auto; padding: 24px;
+            border-radius: var(--radius-lg); width: 92%; max-width: 620px;
+            box-shadow: var(--shadow-elevated);
+            animation: modalIn 0.35s var(--ease);
+            color: var(--text-primary);
+        }
+        @keyframes modalIn {
+            from { opacity: 0; transform: translateY(12px) scale(0.97); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .close-btn {
+            color: var(--text-tertiary); float: right; font-size: 22px; font-weight: 500;
+            cursor: pointer; width: 32px; height: 32px; display: flex;
+            align-items: center; justify-content: center; border-radius: 50%;
+            transition: all var(--duration) var(--ease); background: rgba(0,0,0,0.04);
+            border: none;
+        }
+        .close-btn:hover { color: var(--text-secondary); background: rgba(0,0,0,0.08); }
+        .close-btn:active { transform: scale(0.97); opacity: 0.8; }
+
+        /* ===== 地圖 ===== */
+        #map {
+            width: 100%; height: 400px; margin-top: 14px;
+            border-radius: var(--radius-md); background-color: #e5e5ea;
+        }
+        #map-title {
+            margin: 0; color: var(--text-primary);
+            font-size: 1.1em; font-weight: 700; letter-spacing: -0.02em;
+        }
+
+        /* ===== 距離資訊 ===== */
+        #distance-info { margin-top: 14px; display: none; }
+        .dist-block {
+            padding: 12px 14px; border-radius: var(--radius-md);
+            font-size: 0.88em; margin-bottom: 8px;
+        }
+        .dist-block:last-child { margin-bottom: 0; }
+        .dist-block .dist-row {
+            display: flex; justify-content: space-between;
+            align-items: center; flex-wrap: wrap; gap: 6px;
+        }
+        .dist-block .dist-label { font-weight: 600; }
+        .dist-block a {
+            text-decoration: none; font-weight: 600; margin-left: 10px;
+            padding: 5px 16px; border-radius: 980px; color: #fff; font-size: 0.84em;
+            transition: all var(--duration) var(--ease);
+        }
+        .dist-block a:hover { opacity: 0.88; transform: scale(var(--btn-scale)); }
+        .dist-block a:active { transform: scale(0.97); opacity: 0.8; }
+        .dist-current {
+            background: rgba(0,122,255,0.06); color: var(--accent);
+            border-left: 3px solid var(--accent);
+        }
+        .dist-current a { background: var(--accent); }
+        .dist-prev {
+            background: rgba(255,149,0,0.08); color: #b36800;
+            border-left: 3px solid var(--accent-orange);
+        }
+        .dist-prev a { background: var(--accent-orange); }
+
+        /* ===== 編輯表單 ===== */
+        .edit-form label {
+            display: block; margin-top: 14px; font-weight: 600;
+            color: var(--text-secondary); font-size: 0.82em;
+            text-transform: uppercase; letter-spacing: 0.4px;
+        }
+        .edit-form select {
+            width: 100%; padding: 10px 14px; margin-top: 5px;
+            border: 1px solid rgba(0,0,0,0.08); border-radius: var(--radius-md);
+            font-size: 0.95em; font-family: inherit; background: var(--card-bg);
+            appearance: none; -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: right 12px center;
+            cursor: pointer; transition: all var(--duration) var(--ease);
+        }
+        .edit-form select:focus {
+            outline: none; border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(0,122,255,0.12);
+        }
+        .edit-form input, .edit-form textarea {
+            width: 100%; padding: 10px 14px; margin-top: 5px;
+            border: 1px solid rgba(0,0,0,0.08); border-radius: var(--radius-md);
+            font-size: 0.95em; transition: all var(--duration) var(--ease);
+            font-family: inherit; background: var(--card-bg);
+        }
+        .edit-form input:focus, .edit-form textarea:focus {
+            outline: none; border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(0,122,255,0.12);
+        }
+        .edit-form textarea { resize: vertical; height: 65px; }
+        .edit-form .form-row { display: flex; gap: 12px; }
+        .edit-form .form-row > div { flex: 1; }
+        .edit-form .form-actions { margin-top: 22px; text-align: right; }
+        .edit-form .form-actions button {
+            padding: 10px 26px; border: none; border-radius: 980px;
+            cursor: pointer; font-size: 0.92em; font-weight: 600;
+            margin-left: 10px; transition: all var(--duration) var(--ease);
+        }
+        .edit-form .form-actions button:active { transform: scale(0.97); opacity: 0.8; }
+        .btn-save { background: var(--accent); color: #fff; }
+        .btn-save:hover { transform: scale(var(--btn-scale)); box-shadow: 0 4px 16px rgba(0,122,255,0.25); }
+        .btn-cancel { background: rgba(0,0,0,0.05); color: var(--text-secondary); }
+        .btn-cancel:hover { background: rgba(0,0,0,0.08); transform: scale(var(--btn-scale)); }
+        #edit-title {
+            margin: 0 0 4px; font-size: 1.15em; font-weight: 700;
+            color: var(--text-primary); letter-spacing: -0.02em;
+        }
+
+        /* ===== 照片按鈕 ===== */
+        .btn-photo {
+            background: rgba(88,86,214,0.08); color: #4240a8;
+        }
+        .btn-photo:hover { background: rgba(88,86,214,0.16); transform: scale(var(--btn-scale)); }
+
+        /* ===== 照片瀏覽器 Modal ===== */
+        .photo-viewer-overlay {
+            display: none; position: fixed; z-index: 2000; left: 0; top: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            align-items: center; justify-content: center;
+            flex-direction: column;
+        }
+        .photo-viewer-overlay.active { display: flex; }
+        .photo-viewer-close {
+            position: absolute; top: 16px; right: 20px;
+            color: rgba(255,255,255,0.7); font-size: 32px; cursor: pointer;
+            width: 44px; height: 44px; display: flex; align-items: center;
+            justify-content: center; border-radius: 50%;
+            background: rgba(255,255,255,0.1); transition: all var(--duration) var(--ease); border: none;
+        }
+        .photo-viewer-close:hover { color: #fff; background: rgba(255,255,255,0.2); }
+        .photo-viewer-close:active { transform: scale(0.97); opacity: 0.8; }
+        .photo-viewer-img-wrap {
+            position: relative; max-width: 90vw; max-height: 75vh;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .photo-viewer-img-wrap img {
+            max-width: 90vw; max-height: 75vh; object-fit: contain;
+            border-radius: var(--radius-md);
+            box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+            animation: photoFadeIn 0.3s var(--ease);
+        }
+        @keyframes photoFadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .photo-nav {
+            position: absolute; top: 50%; transform: translateY(-50%);
+            width: 48px; height: 48px; border-radius: 50%;
+            background: rgba(255,255,255,0.15); color: #fff;
+            border: none;
+            font-size: 20px; cursor: pointer; display: flex;
+            align-items: center; justify-content: center;
+            transition: all var(--duration) var(--ease); backdrop-filter: blur(8px);
+        }
+        .photo-nav:hover { background: rgba(255,255,255,0.3); transform: translateY(-50%) scale(var(--btn-scale)); }
+        .photo-nav:active { transform: translateY(-50%) scale(0.97); opacity: 0.8; }
+        .photo-nav.prev { left: -60px; }
+        .photo-nav.next { right: -60px; }
+        .photo-counter {
+            color: rgba(255,255,255,0.7); font-size: 0.9em;
+            margin-top: 14px; font-weight: 500;
+        }
+
+        /* ===== 照片行程上下切換 ===== */
+        .photo-event-nav {
+            background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.8);
+            border: none; border-radius: 980px;
+            padding: 8px 22px; font-size: 0.85em; font-weight: 600;
+            cursor: pointer; transition: all var(--duration) var(--ease);
+            backdrop-filter: blur(8px); font-family: inherit;
+        }
+        .photo-event-nav:hover { background: rgba(255,255,255,0.25); color: #fff; }
+        .photo-event-nav:active { transform: scale(0.97); opacity: 0.8; }
+        .photo-event-nav:disabled {
+            opacity: 0.3; cursor: default;
+            pointer-events: none;
+        }
+        .photo-event-prev { margin-bottom: 12px; }
+        .photo-event-next { margin-top: 8px; }
+        .photo-event-label {
+            color: rgba(255,255,255,0.55); font-size: 1.6em;
+            margin-top: 6px; text-align: center; font-weight: 600;
+        }
+
+        /* ===== 照片網址輸入 ===== */
+        .edit-form .photo-urls-area {
+            width: 100%; padding: 10px 14px; margin-top: 5px;
+            border: 1px solid rgba(0,0,0,0.08); border-radius: var(--radius-md);
+            font-size: 0.95em; font-family: inherit; background: var(--card-bg);
+            resize: vertical; height: 80px; transition: all var(--duration) var(--ease);
+        }
+        .edit-form .photo-urls-area:focus {
+            outline: none; border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(0,122,255,0.12);
+        }
+
+        /* ===== RWD ===== */
+        @media (max-width: 600px) {
+            body { padding: 8px; font-size: 1.2em; }
+            .control-panel { padding: 24px 16px 22px; }
+            .control-panel h2 { font-size: 1.6em; }
+            .control-panel p { font-size: 1.05em; }
+            .control-panel button { padding: 14px 26px; font-size: 1.05em; }
+            .day-group { margin-bottom: 16px; }
+            .day-header { font-size: 1.2em; padding: 16px 16px; }
+            .day-header button { font-size: 0.9em; padding: 8px 16px; }
+            .event-card { padding: 16px; flex-wrap: wrap; }
+            .time { width: 60px; font-size: 1.15em; }
+            .day-group .day-body { padding-left: 20px; }
+            .day-body::before { left: 28px; }
+            .location { font-size: 1.15em; }
+            .desc { font-size: 1em; margin-top: 4px; }
+            .drive { font-size: 0.9em; padding: 4px 12px; }
+            .weather { font-size: 0.85em; padding: 4px 12px; }
+            .event-actions { margin-left: 8px; gap: 6px; }
+            .event-actions button { padding: 10px 18px; font-size: 0.95em; }
+            .dist-block { font-size: 1em; padding: 14px; }
+            .dist-block .dist-row { flex-direction: column; align-items: flex-start; }
+            .dist-block a { margin-left: 0; margin-top: 8px; font-size: 0.95em; padding: 8px 18px; }
+            .edit-form .form-row { flex-direction: column; gap: 0; }
+            .edit-form label { font-size: 0.95em; }
+            .edit-form select { font-size: 1.1em; padding: 14px; }
+            .edit-form input, .edit-form textarea { font-size: 1.1em; padding: 14px; }
+            .edit-form .form-actions button { font-size: 1.1em; padding: 14px 28px; }
+            .edit-form .photo-urls-area { font-size: 1.1em; padding: 14px; }
+            #map-title { font-size: 1.2em; }
+            .modal-content { padding: 20px 16px; margin: 3% auto; }
+            .photo-nav.prev { left: 8px; }
+            .photo-nav.next { right: 8px; }
+            .photo-nav { width: 40px; height: 40px; font-size: 18px; background: rgba(0,0,0,0.5); }
+        }
+
+        /* ===== Toast 提示 ===== */
+        .toast {
+            position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
+            background: rgba(28,28,30,0.88); color: #fff;
+            padding: 12px 28px; border-radius: var(--radius-md);
+            font-size: 0.92em; font-weight: 600; z-index: 9999;
+            backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+            pointer-events: none; opacity: 0;
+            transition: opacity var(--duration) var(--ease);
+        }
+        .toast.visible { opacity: 1; }
+
+        /* ===== 深色模式 ===== */
+        html.dark {
+            --page-bg: #000000;
+            --card-bg: #1C1C1E;
+            --text-primary: rgba(255,255,255,0.9);
+            --text-secondary: rgba(255,255,255,0.55);
+            --text-tertiary: rgba(255,255,255,0.3);
+            --separator: rgba(255,255,255,0.15);
+            --shadow-soft: 0 0 0 1px rgba(255,255,255,0.1);
+            --shadow-elevated: 0 0 0 1px rgba(255,255,255,0.12), 0 24px 80px rgba(0,0,0,0.6);
+            color-scheme: dark;
+        }
+        html.dark .day-header { background: rgba(44, 44, 46, 0.85); border-bottom: 1px solid rgba(255, 255, 255, 0.1); color: #ffffff; text-shadow: 0 1px 3px rgba(0,0,0,0.8); box-shadow: none; }
+        html.dark .event-card:hover {
+            background: #2C2C2E; border-bottom-color: transparent;
+            box-shadow: 0 12px 24px rgba(0,0,0,0.6), 0 4px 8px rgba(0,0,0,0.4);
+        }
+        html.dark .btn-export { background: rgba(52,199,89,0.15); color: #32d74b; }
+        html.dark .btn-export:hover { background: rgba(52,199,89,0.25); }
+        html.dark .btn-import { background: rgba(255,159,10,0.15); color: #ff9f0a; }
+        html.dark .btn-import:hover { background: rgba(255,159,10,0.25); }
+        html.dark .btn-add-top { background: rgba(10,132,255,0.15); color: rgba(255,255,255,0.9); }
+        html.dark .btn-add-top:hover { background: rgba(10,132,255,0.25); }
+        html.dark .btn-edit { background: rgba(10,132,255,0.12); color: rgba(255,255,255,0.9); }
+        html.dark .btn-edit:hover { background: rgba(10,132,255,0.22); }
+        html.dark .btn-delete { background: rgba(255,69,58,0.1); color: #ff453a; }
+        html.dark .btn-delete:hover { background: rgba(255,69,58,0.2); }
+        html.dark .btn-photo { background: rgba(94,92,230,0.12); color: rgba(255,255,255,0.9); }
+        html.dark .btn-photo:hover { background: rgba(94,92,230,0.22); }
+        html.dark .btn-save { background: #0a84ff; }
+        html.dark .btn-cancel { background: rgba(255,255,255,0.08); color: var(--text-secondary); }
+        html.dark .btn-cancel:hover { background: rgba(255,255,255,0.12); }
+        html.dark .location { color: rgba(255,255,255,0.9); }
+        html.dark .location:hover { color: #ff9f0a; }
+        html.dark .time { color: var(--text-primary); }
+        html.dark .drive { background: rgba(50,215,75,0.12); color: #32d74b; }
+        html.dark .weather { background: rgba(10,132,255,0.1); color: rgba(255,255,255,0.7); }
+        html.dark .meal-tag-breakfast { background: rgba(255,159,10,0.15); color: #ff9f0a; }
+        html.dark .meal-tag-lunch { background: rgba(50,215,75,0.15); color: #32d74b; }
+        html.dark .meal-tag-dinner { background: rgba(94,92,230,0.15); color: rgba(255,255,255,0.7); }
+        html.dark .event-card.meal-breakfast { background: rgba(255,159,10,0.06); border-left-color: #ff9f0a; }
+        html.dark .event-card.meal-breakfast:hover { background: rgba(255,159,10,0.12); }
+        html.dark .event-card.meal-lunch { background: rgba(50,215,75,0.06); border-left-color: #32d74b; }
+        html.dark .event-card.meal-lunch:hover { background: rgba(50,215,75,0.12); }
+        html.dark .event-card.meal-dinner { background: rgba(94,92,230,0.06); border-left-color: #5e5ce6; }
+        html.dark .event-card.meal-dinner:hover { background: rgba(94,92,230,0.12); }
+        html.dark .dist-current { background: rgba(10,132,255,0.1); color: rgba(255,255,255,0.8); border-left-color: #0a84ff; }
+        html.dark .dist-current a { background: #0a84ff; }
+        html.dark .dist-prev { background: rgba(255,159,10,0.1); color: #ff9f0a; border-left-color: #ff9f0a; }
+        html.dark .dist-prev a { background: #ff9f0a; }
+        html.dark .modal { background-color: rgba(0,0,0,0.4); }
+        html.dark .close-btn { background: rgba(255,255,255,0.08); color: var(--text-tertiary); }
+        html.dark .close-btn:hover { background: rgba(255,255,255,0.14); color: var(--text-secondary); }
+        html.dark .day-header button { background: rgba(255,255,255,0.06); color: var(--text-secondary); }
+        html.dark .day-header button:hover { background: rgba(255,255,255,0.1); color: var(--text-primary); }
+        html.dark select,
+        html.dark option,
+        html.dark input {
+            background-color: var(--card-bg, #2C2C2E);
+            color: var(--text-primary, #ffffff);
+        }
+        html.dark .edit-form select,
+        html.dark .edit-form input,
+        html.dark .edit-form textarea,
+        html.dark .edit-form .photo-urls-area {
+            background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.1);
+            color: var(--text-primary);
+        }
+        html.dark .edit-form select:focus,
+        html.dark .edit-form input:focus,
+        html.dark .edit-form textarea:focus,
+        html.dark .edit-form .photo-urls-area:focus {
+            border-color: #0a84ff;
+            box-shadow: 0 0 0 3px rgba(10,132,255,0.2);
+        }
+        html.dark #map { background-color: #2c2c2e; }
+        html.dark .day-body::before { background: rgba(255,255,255,0.1); }
+        html.dark .dropdown-toggle { background: rgba(255,255,255,0.06); color: var(--text-secondary); }
+        html.dark .dropdown-toggle:hover { background: rgba(255,255,255,0.1); }
+        html.dark .dropdown-menu { background: #2c2c2e; }
+        html.dark .dropdown-menu button { color: var(--text-primary); }
+        html.dark .dropdown-menu button:hover { background: rgba(255,255,255,0.06); }
+    </style>
+
+    <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=23c93e2cb5e1f94db7ffe804efdc2a47&libraries=services" onerror="console.error('Kakao SDK 載入失敗')"></script>
+</head>
+<body>
+<div id="toast" class="toast"></div>
+
+<div class="container">
+    <div class="control-panel">
+        <h2>濟州島行程管理系統 (地圖版)</h2>
+        <p>點擊 📍 地點查看地圖，使用右側按鈕編輯或刪除行程。</p>
+        <button class="btn-add-top" onclick="addEvent()">+ 新增行程</button>
+        <button class="dropdown-toggle" id="btn-theme" onclick="toggleTheme()">🌙 深色模式</button>
+        <button id="btn-cloud-save" class="btn-export" style="background: rgba(88,86,214,0.1); color: #5856D6;" onclick="saveToCloud()">儲存至雲端</button>
+        <button id="btn-cloud-load" class="btn-import" style="background: rgba(88,86,214,0.1); color: #5856D6;" onclick="loadFromCloud()">從雲端載入</button>
+        <div class="dropdown">
+            <button class="dropdown-toggle" onclick="toggleDropdown(event)">⚙️ 更多工具</button>
+            <div class="dropdown-menu" id="toolsDropdown">
+                <button onclick="exportCSV(); closeDropdown()">匯出 CSV</button>
+                <button onclick="exportJSON(); closeDropdown()">💾 匯出行程</button>
+                <button onclick="document.getElementById('import-json-input').click(); closeDropdown()">📂 匯入行程</button>
+                <button onclick="resetData(); closeDropdown()">還原預設</button>
+            </div>
+        </div>
+        <input type="file" id="import-json-input" accept=".json" style="display:none" onchange="importJSON(event)">
+    </div>
+    <div id="itineraryDisplay"></div>
+</div>
+
+<!-- 地圖 Modal -->
+<div id="mapModal" class="modal">
+    <div class="modal-content">
+        <span class="close-btn" onclick="closeMap()">&times;</span>
+        <h3 id="map-title">載入中...</h3>
+        <div id="map"></div>
+        <div id="distance-info"></div>
+        <button id="btn-parking" onclick="findParking()" style="display:none; width:100%; margin-top:10px; padding:10px 0; border:none; border-radius:980px; background:rgba(52,199,89,0.12); color:#1a8f3f; font-size:0.92em; font-weight:600; cursor:pointer; transition:all 0.3s cubic-bezier(0.4,0,0.2,1);" onmouseover="this.style.background='rgba(52,199,89,0.22)'" onmouseout="this.style.background='rgba(52,199,89,0.12)'">🔍 尋找周邊停車場</button>
+    </div>
+</div>
+
+<!-- 照片瀏覽器 -->
+<div id="photoViewer" class="photo-viewer-overlay" onclick="if(event.target===this)closePhotoViewer()">
+    <button class="photo-viewer-close" onclick="closePhotoViewer()">&times;</button>
+    <button class="photo-event-nav photo-event-prev" onclick="photoEventNav(-1)">&#9650; 上一個行程</button>
+    <div class="photo-viewer-img-wrap">
+        <button class="photo-nav prev" onclick="photoNav(-1)">&#10094;</button>
+        <img id="photoViewerImg" src="" alt="照片">
+        <button class="photo-nav next" onclick="photoNav(1)">&#10095;</button>
+    </div>
+    <div class="photo-counter" id="photoCounter">1 / 1</div>
+    <div class="photo-event-label" id="photoEventLabel"></div>
+    <button class="photo-event-nav photo-event-next" onclick="photoEventNav(1)">&#9660; 下一個行程</button>
+</div>
+
+<!-- 編輯 Modal -->
+<div id="editModal" class="modal">
+    <div class="modal-content">
+        <span class="close-btn" onclick="closeEdit()">&times;</span>
+        <h3 id="edit-title">編輯行程</h3>
+        <div class="edit-form">
+            <div class="form-row">
+                <div>
+                    <label>天數</label>
+                    <select id="edit-day">
+                        <option value="1">第 1 天 - 04/09 (三)</option>
+                        <option value="2">第 2 天 - 04/10 (四)</option>
+                        <option value="3">第 3 天 - 04/11 (五)</option>
+                        <option value="4">第 4 天 - 04/12 (六)</option>
+                        <option value="5">第 5 天 - 04/13 (日)</option>
+                        <option value="6">第 6 天 - 04/14 (一)</option>
+                        <option value="7">第 7 天 - 04/15 (二)</option>
+                    </select>
+                </div>
+                <div>
+                    <label>時間</label>
+                    <select id="edit-time"></select>
+                </div>
+            </div>
+            <label>類型</label>
+            <select id="edit-type">
+                <option value="normal">一般行程</option>
+                <option value="breakfast">早餐</option>
+                <option value="lunch">午餐</option>
+                <option value="dinner">晚餐</option>
+            </select>
+            <div class="form-row">
+                <div>
+                    <label>地點（中文）</label>
+                    <input type="text" id="edit-location-zh" placeholder="例：山房山 & 龍頭海岸">
+                </div>
+                <div>
+                    <label>地點（韓文）</label>
+                    <input type="text" id="edit-location-kr" placeholder="예: 산방산 용머리해안">
+                </div>
+            </div>
+            <label>絕對地標（最高搜尋順位）</label>
+            <input type="text" id="edit-landmark" placeholder="絕對地標/地址/電話（最高搜尋順位）">
+            <label>說明 (Description)</label>
+            <textarea id="edit-desc" placeholder="行程描述"></textarea>
+            <label>照片網址（每行一個 URL）</label>
+            <textarea id="edit-photos" class="photo-urls-area" placeholder="https://example.com/photo1.jpg&#10;https://example.com/photo2.jpg"></textarea>
+            <div class="form-actions">
+                <button class="btn-cancel" onclick="closeEdit()">取消</button>
+                <button class="btn-save" onclick="saveEvent()">儲存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ========== 行程資料 ==========
+        const defaultItineraryData = [
+      {
+        "day": "1",
+        "date": "04/09 (四)",
+        "time": "06:00",
+        "type": "normal",
+        "location": "抵達濟州機場 제주국제공항",
+        "landmark": "제주국제공항",
+        "desc": "辦理入境手續與領取行李。",
+        "drive": "",
+        "photos": [
+          "https://api.cdn.visitjeju.net/photomng/imgpath/201804/30/7edf9d03-e94b-44c5-b562-2f946e76cd63.webp"
+        ]
+      },
+      {
+        "day": "1",
+        "date": "04/09 (四)",
+        "time": "07:00",
+        "type": "normal",
+        "location": "Lotte Rent-a-car 롯데렌터카 제주오토하우스",
+        "landmark": "롯데렌터카 제주오토하우스",
+        "desc": "辦理取車手續並設定導航。",
+        "drive": "🚗 車程：約 2 分鐘",
+        "photos": [
+          "https://www.lotterentacar.net/atch/getImage.do?atchFileId=FILE0000000005381733"
+        ]
+      },
+      {
+        "day": "1",
+        "date": "04/09 (四)",
+        "time": "08:30",
+        "type": "breakfast",
+        "location": "你好，鮑魚 안녕, 전복",
+        "landmark": "안녕전복",
+        "desc": "機場附近享用鮑魚飯卷與鮑魚粥。",
+        "drive": "🚗 車程：約 5 分鐘",
+        "photos": [
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSVyfVvgDtAQavq7rzQjlB1PexhRiAonWVXUg&s",
+          "https://dynamic-media-cdn.tripadvisor.com/media/photo-o/2d/7e/b9/69/caption.jpg?w=500&h=-1&s=1",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT2k9-cqLCRHpufGWPuZeMPM5gxHmTLvj7UXg&s"
+        ]
+      },
+      {
+        "day": "1",
+        "date": "04/09 (四)",
+        "time": "10:30",
+        "type": "normal",
+        "location": "白色櫻花隧道 (典農路) 전농로 벚꽃길",
+        "landmark": "전농로 벚꽃거리",
+        "desc": "欣賞 4 月盛開的櫻花美景。",
+        "drive": "🚗 車程：約 7 分鐘",
+        "photos": [
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcR06x7NcV1kaDmsceLKCfMv0MiBnheAk6jy8w&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSrUpd5xIfetFlFRqqe88VavOtqa9oMAuoJ7w&s",
+          "https://www.balpumnews.com/wp-content/uploads/2026/03/batch_%EC%97%B0%ED%95%A9%EB%89%B4%EC%8A%A4-%EC%A0%9C%EC%A3%BC-%EC%A0%84%EB%86%8D%EB%A1%9C-%EC%99%95%EB%B2%9A%EA%BD%83-%EC%B6%95%EC%A0%9C-6-1024x768.jpg"
+        ]
+      },
+      {
+        "day": "1",
+        "date": "04/09 (四)",
+        "time": "12:00",
+        "type": "lunch",
+        "location": "東門傳統巿場 동문재래시장",
+        "landmark": "동문재래시장",
+        "desc": "享用午餐並感受市場氛圍 鹽冰淇淋麵包。",
+        "drive": "🚗 車程：約 3 分鐘",
+        "photos": [
+          "https://dailycheska.com/wp-content/uploads/02-%E6%BF%9F%E5%B7%9E%E6%9D%B1%E9%96%80%E5%B8%82%E5%A0%B4%E5%85%A7%E9%83%A8%E5%AF%A6%E6%8B%8D.jpg",
+          "https://dailycheska.com/wp-content/uploads/%E5%9C%96%E7%89%87%E8%AA%BF%E6%95%B4_%E7%B2%BE%E9%81%B8W1200-x-H680.001-1.png",
+          "https://cc.tvbs.com.tw/img/program/upload/2022/12/22/20221222180651-33aab77c.jpg",
+          "https://ginatw.com/wp-content/uploads/2018/11/01-1.jpg"
+        ]
+      },
+      {
+        "day": "1",
+        "date": "04/09 (四)",
+        "time": "13:00",
+        "type": "normal",
+        "location": "Abebe Bakery",
+        "landmark": "아베베베이커리 제주",
+        "desc": "超好吃DOUNUT。",
+        "drive": "",
+        "photos": [
+          "https://img.poibank.com/6ZipTYEfXLBEkcVxkeApAdcs3B8=/W3siZm9ybWF0IjoianBnIn0seyJrZXkiOiJzdWdnZXN0aW9uLzI3MDM1NTA5LzY1NzM4MjYvMTY4MzY0NzIzNTkzNSJ9LHsicmVzaXplIjp7IndpZHRoIjoiODAwIn19XQ==",
+          "https://static.popdaily.com.tw/u/202311/daf2f0d9-b7e2-4274-8011-295a20d494bc.jpeg",
+          "https://chiaslife.com/wp-content/uploads/2024/09/IMG_6336-scaled.jpg"
+        ]
+      },
+      {
+        "day": "1",
+        "date": "04/09 (四)",
+        "time": "14:00",
+        "type": "normal",
+        "location": "七星街 용두암 용연구름다리",
+        "landmark": "칠성로쇼핑거리",
+        "desc": "ROUND1伴手禮 Daiso。",
+        "drive": "🚗 車程：約 1 分鐘",
+        "photos": [
+          "https://big5chinese.visitkorea.or.kr/public/internal/ShoppingSpecial/img/wheretoshop/detail/chilseongroshoppingstreet/jeju_chilsungro.png",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQOohO9bUkF1wyhJmP3fBQgMCHb_mD_RLZ1NA&s",
+          "https://i0.wp.com/travelwithlinlin.com/wp-content/uploads/%E4%B8%83%E6%98%9F%E8%A1%9702.jpg?resize=970%2C682&ssl=1"
+        ]
+      },
+      {
+        "day": "1",
+        "date": "04/09 (四)",
+        "time": "15:00",
+        "type": "normal",
+        "location": "大型超市採買 롯데마트 제주점",
+        "landmark": "블루엘리펀트 제주",
+        "desc": "Lotte Mart 或 E-mart 採買晚上零食。",
+        "drive": "🚗 車程：約 35 分鐘",
+        "photos": [
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQjK93YfiIi_YB5QEezKESmYJbss4V6haTKCA&s",
+          "https://www.hanchao.com/varimg/photogallery/Article_Photo/20735/big_392403.jpg",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRE1L4I2LKj4fc9Id1564wt_I04cDRiQDPbQg&s"
+        ]
+      },
+      {
+        "day": "1",
+        "date": "04/09 (四)",
+        "time": "17:00",
+        "type": "dinner",
+        "location": "夢炭烤肉 몽탄 제주",
+        "landmark": "몽탄 제주",
+        "desc": "濟州島必吃黑豬肉烤肉。",
+        "drive": "🚗 車程：約 45 分鐘",
+        "photos": [
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQn4H9YEQj9dCNNGh24BpgCzuRu7ojAxADKZA&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRrwRmPlcB13rHD-cOtV00Bcdm8_khSn1w_Fg&s"
+        ]
+      },
+      {
+        "day": "1",
+        "date": "04/09 (四)",
+        "time": "21:30",
+        "type": "normal",
+        "location": "入住 Kylin Villa Resort 기린빌라리조트",
+        "landmark": "기린빌라리조트",
+        "desc": "辦理入住與休息。",
+        "drive": "🚗 車程：約 52 分鐘",
+        "photos": [
+          "https://cf.bstatic.com/xdata/images/hotel/max1024x768/307566118.jpg?k=f35a1f7f2aa109fc7b4c1fb1ab41fe3d45b6049efa11debb827ec882eb0dd1da&o=",
+          "https://res.klook.com/klook-hotel/image/upload/w_750,c_fill,q_85/travelapi/16000000/15610000/15606700/15606644/b0291ea4_z.jpg",
+          "https://cf.bstatic.com/xdata/images/hotel/max1024x768/706908383.jpg?k=e2ef8ca18f9d50f006a0d2e3150a31148cd3eec7d586dc15f2a26df4351ee56a&o="
+        ]
+      },
+      {
+        "day": "2",
+        "date": "04/10 (五)",
+        "time": "10:00",
+        "type": "normal",
+        "location": "鹿山路油菜花路 녹산로 유채꽃길",
+        "landmark": "녹산로 유채꽃길",
+        "desc": "春季限定的櫻花與油菜花雙色公路。",
+        "drive": "🚗 車程：約 24 分鐘",
+        "photos": [
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSsZKhQPDHlb9Gr72_udeffJHZiTwufhqEDug&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQnUhfd_9Zp2ajkk1gIjrwAmZFKt6Z1440b0Q&s",
+          "https://itinerary.colatour.com.tw/COLA_AppFiles/A03A_Tour/PictureObj/00031507.JPG",
+          "https://res.klook.com/images/w_1200,h_630,c_fill,q_65/w_80,x_15,y_15,g_south_west,l_Klook_water_br_trans_yhcmh3/activities/ooxwlfc7sdcg6hl8kdrn/%E6%BF%9F%E5%B7%9E%E6%AB%BB%E8%8A%B1%E4%B9%8B%E6%97%852026%7C%E9%B9%BF%E5%B1%B1%E8%B7%AF%E3%80%81%E6%B2%B9%E8%8F%9C%E8%8A%B1%E8%B7%AF%E8%88%87%E9%9F%93%E5%8A%87%E6%8B%8D%E6%94%9D%E5%9C%B0-Klook%E5%AE%A2%E8%B7%AF.jpg"
+        ]
+      },
+      {
+        "day": "2",
+        "date": "04/10 (五)",
+        "time": "13:30",
+        "type": "lunch",
+        "location": "Sehwa排骨湯 세화갈비",
+        "landmark": "세화갈비",
+        "desc": "享用美味辣燉排骨。",
+        "drive": "🚗 車程：約 38 分鐘",
+        "photos": [
+          "https://nataslife.com/wp-content/uploads/20241018231218_0_52b317.jpg",
+          "https://nataslife.com/wp-content/uploads/20241018231225_0_3fe02d.jpg",
+          "https://nataslife.com/wp-content/uploads/20241018231228_0_f8ed79.jpg"
+        ]
+      },
+      {
+        "day": "2",
+        "date": "04/10 (五)",
+        "time": "14:30",
+        "type": "normal",
+        "location": "水星球水族館 아쿠아플라넷 제주",
+        "landmark": "아쿠아플라넷 제주",
+        "desc": "參觀大型水族館與海女表演。",
+        "drive": "🚗 車程：約 24 分鐘",
+        "photos": [
+          "https://www.hanchao.com/varimg/photo_tour/aquaplanet_jeju/big_file_10450.jpg",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTaMpbFQArbQoA4GglGnHjEjPmUpIEcFhIvww&s",
+          "https://lizzzstyle.tw/wp-content/uploads/2024/06/InCollage_20240617_150538354.jpg",
+          "https://www.hanchao.com/varimg/photo_tour/aquaplanet_jeju/album_file_ct.jpg"
+        ]
+      },
+      {
+        "day": "2",
+        "date": "04/10 (五)",
+        "time": "17:00",
+        "type": "normal",
+        "location": "涉地可支 섭지코지",
+        "landmark": "섭지코지",
+        "desc": "海岸步道與燈塔風景。",
+        "drive": "🚗 車程：約 2 分鐘",
+        "photos": [
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcR7mUgqN7vnWzzPeGTtTVlRJ-OsMj0BMkxXvQ&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSGBxkS_HeWFtGaHYI3DfAUzySKSAbE2AmHgA&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTRcA22F6yItBdgBk5KWVT0b-8AxnOxdYh5zA&s",
+          "https://tong.visitkorea.or.kr/cms/resource/53/3112653_image2_1.jpg"
+        ]
+      },
+      {
+        "day": "2",
+        "date": "04/10 (五)",
+        "time": "19:30",
+        "type": "dinner",
+        "location": "黑豬海鮮三合 흑돼지해물삼합",
+        "landmark": "흑돼지해물삼합",
+        "desc": "一次品嚐黑豬肉與新鮮海味、也可吃其他非烤肉。",
+        "drive": "🚗 車程：約 76 分鐘",
+        "photos": [
+          "https://qrplace.shop/wp-content/uploads/2024/12/%ED%9D%91%EB%8F%BC%EC%A7%80%ED%95%B4%EB%AC%BC%EC%82%BC%ED%95%A9_%EB%8C%80%ED%91%9C%EC%9D%B4%EB%AF%B8%EC%A7%80.jpg",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSFJYEJfUZ6wsO1S1RdmEbxWYOAQrDlopCtWQ&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSz_fZnKPYy8TlKDc4jVDjIVbvIFWjqdAOWBA&s"
+        ]
+      },
+      {
+        "day": "3",
+        "date": "04/11 (六)",
+        "time": "09:30",
+        "type": "normal",
+        "location": "城山港往牛島 성산포항종합여객터미널",
+        "landmark": "성산포항종합여객터미널",
+        "desc": "搭乘渡輪前往牛島。",
+        "drive": "🚗 車程：約 63 分鐘",
+        "photos": [
+          "https://i0.wp.com/koreagaja.com/wp-content/uploads/2540b940f963189025598c9a927ebd53.jpg?quality=100&ssl=1"
+        ]
+      },
+      {
+        "day": "3",
+        "date": "04/11 (六)",
+        "time": "10:00",
+        "type": "normal",
+        "location": "牛島全日遊 우도",
+        "landmark": "우도",
+        "desc": "租電動車環島、西濱白沙、海女海鮮鍋、花生冰淇淋。",
+        "drive": "🚗 車程：約 8 分鐘",
+        "photos": [
+          "https://res.klook.com/images/w_1200,h_630,c_fill,q_65/w_80,x_15,y_15,g_south_west,l_Klook_water_br_trans_yhcmh3/activities/w2pqoj7to3vcm6ndoycw/%E9%9F%93%E5%9C%8B%E6%BF%9F%E5%B7%9E%E5%B3%B6%E6%9D%B1%E9%83%A8%E5%8D%97%E9%83%A8%E5%BF%85%E6%B8%B8%E6%99%AF%E9%BB%9E%EF%BD%9C%E7%89%9B%E5%B3%B6%EF%BC%8B%E5%9F%8E%E5%B1%B1%E6%97%A5%E5%87%BA%E5%B3%B0%EF%BC%8B%E6%B6%89%E5%9C%B0%E5%8F%AF%E6%94%AF%E7%AD%89%E6%B5%AA%E6%BC%AB%E9%9F%93%E5%8A%87%E6%89%93%E5%8D%A1%E8%B7%AF%E7%B7%9A(%E5%B0%88%E6%A5%AD%E4%B8%AD%E6%96%87%E5%8F%B8%E6%A9%9F)-Klook%E5%AE%A2%E8%B7%AF.jpg"
+        ]
+      },
+      {
+        "day": "3",
+        "date": "04/11 (六)",
+        "time": "12:00",
+        "type": "lunch",
+        "location": "On-Off 牛島店 온오프",
+        "landmark": "온오프",
+        "desc": "芝士炸豬排",
+        "drive": "🚗 車程：約 2 分鐘",
+        "photos": [
+          "https://pimg.1px.tw/abby0318/1756827383-3601729686-g.jpg",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTOzX5eWsfTuof5_6mDfNWnRlA5Z6stccbu6g&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQp6UttHhhlSuG3odxAt_YxXJ17fIWrV7aztQ&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ9NtM5fZDuPWuIwvby7ixB6-jtabG0CrQEBw&s"
+        ]
+      },
+      {
+        "day": "3",
+        "date": "04/11 (六)",
+        "time": "17:30",
+        "type": "normal",
+        "location": "城山日出峰 성산일출봉",
+        "landmark": "성산일출봉",
+        "desc": "火山口、左邊是免費Hiking。",
+        "drive": "🚗 車程：約 12 分鐘",
+        "photos": [
+          "https://www.travelwithjason.com.tw/wp-content/uploads/2020/02/Jeju-%E5%9F%8E%E5%B1%B1%E6%97%A5%E5%87%BA%E5%B3%B02.jpg",
+          "https://image.cdn-eztravel.com.tw/HFQTCt0LlZLsibu_fpp_ugYi49mXiF38o639x5-X-Ns/g:ce/aHR0cHM6Ly92YWNhdGlvbi5jZG4tZXp0cmF2ZWwuY29tLnR3L2ltZy9WRFIvS1JfNzkwNDk5NzM0LmpwZw.jpg",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQOIPrtlJOQulvspku-5x4qv8TSS-KS9eyxWw&s",
+          "https://image.cdn-eztravel.com.tw/SAL_7QRauOyX-cDlrVqLpeSnVlKM0vHaSOXHqIV3iPI/g:ce/aHR0cHM6Ly92YWNhdGlvbi5jZG4tZXp0cmF2ZWwuY29tLnR3L2ltZy9WRFIvS1JfNDI0NjY3ODIxLmpwZw.jpg"
+        ]
+      },
+      {
+        "day": "3",
+        "date": "04/11 (六)",
+        "time": "19:30",
+        "type": "dinner",
+        "location": "西歸浦每日偶來市場 서귀포매일올레시장",
+        "landmark": "서귀포매일올레시장",
+        "desc": "晚上爽、橘子大福。",
+        "drive": "🚗 車程：約 82 分鐘",
+        "photos": [
+          "https://www.hanchao.com/varimg/photogallery/Article_Photo/7662/big_273466.jpg",
+          "https://i0.wp.com/journey.tw/wp-content/uploads/2022-12-10-203337-21.jpg?ssl=1",
+          "https://ericgo.com/wp-content/uploads/20221224162656_24.jpg",
+          "https://voniblog.com/wp-content/uploads/2023/02/20230202082754_21.jpg"
+        ]
+      },
+      {
+        "day": "4",
+        "date": "04/12 (日)",
+        "time": "10:00",
+        "type": "normal",
+        "location": "退房",
+        "landmark": "기린빌라리조트",
+        "desc": "離開 Kylin Villa，往西移動。",
+        "drive": "🚗 車程：約 49 分鐘",
+        "photos": []
+      },
+      {
+        "day": "4",
+        "date": "04/12 (日)",
+        "time": "10:30",
+        "type": "normal",
+        "location": "山茶花之丘 카멜리아힐",
+        "landmark": "카멜리아힐",
+        "desc": "4月春季花卉散策。",
+        "drive": "🚗 車程：約 49 分鐘",
+        "photos": [
+          "https://banbi.tw/wp-content/uploads/20170628182630_40.jpg",
+          "https://icrvb3jy.xinmedia.com/solomo/article/1/d/9/1d944e7d-8ff8-4198-9b5c-4ce77fd128b9.jpeg",
+          "https://judyer.com/wp-content/uploads/20240608182129_0_17b684.jpg",
+          "https://blog-static.kkday.com/zh-hk/blog/wp-content/uploads/4-43-644x859.jpg"
+        ]
+      },
+      {
+        "day": "4",
+        "date": "04/12 (日)",
+        "time": "11:00",
+        "type": "normal",
+        "location": "正房瀑布 정방폭포",
+        "landmark": "정방폭포",
+        "desc": "",
+        "drive": "🚗 車程：約 38 分鐘",
+        "photos": [
+          "https://image.cdn-eztravel.com.tw/y4VQ-PHrv6_R9XcfBlpxPs-sMhJg6XCa6gEOXzmYQ20/g:ce/aHR0cHM6Ly92YWNhdGlvbi5jZG4tZXp0cmF2ZWwuY29tLnR3L2ltZy9WRFIvS1JfNzI0ODQ0NTAwLmpwZw.jpg",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSwVIJzhCv7A3gK7bNGh7fKVDZClo_miKLJpQ&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTgBPSR8hxw5U_vOdJyZXZNbZo2IPW9ymRC1Q&s"
+        ]
+      },
+      {
+        "day": "4",
+        "date": "04/12 (日)",
+        "time": "11:30",
+        "type": "lunch",
+        "location": "州純蕎麥麵 제주순메밀막국수",
+        "landmark": "제주순메밀막국수",
+        "desc": "健康的 100% 純蕎麥麵。",
+        "drive": "🚗 車程：約 50 分鐘",
+        "photos": [
+          "https://img.hani.co.kr/imgdb/china/news/resize/2020/0821/159799526558_20200821.jpg",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTfdEeC-PEEBrBx2WG5lxDjJgxQrIEKwA2atQ&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSlQKJc05yYx30pgZVSlIBezjDfm3gMnKjQew&s"
+        ]
+      },
+      {
+        "day": "4",
+        "date": "04/12 (日)",
+        "time": "12:00",
+        "type": "normal",
+        "location": "柱狀節理帶 주상절리대",
+        "landmark": "주상절리대",
+        "desc": "壯觀的六角形火成岩海岸。",
+        "drive": "🚗 車程：約 25 分鐘",
+        "photos": [
+          "https://dynamic-media-cdn.tripadvisor.com/media/photo-o/12/72/89/8a/20180323-125613-largejpg.jpg?w=900&h=-1&s=1",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS4j3U2OsSZu7-wt-R8mwM6qfY-tCx48YlEtw&s"
+        ]
+      },
+      {
+        "day": "4",
+        "date": "04/12 (日)",
+        "time": "13:00",
+        "type": "normal",
+        "location": "橘子咖啡廳 감따남",
+        "landmark": "감따남",
+        "desc": "",
+        "drive": "🚗 車程：約 13 分鐘",
+        "photos": [
+          "https://mamahuhu.blog/wp-content/uploads/2025/10/Jeju-Cafe-the-Container-4.webp",
+          "https://assets.funliday.com/posts/wp-content/uploads/2025/12/17171054/jeju_orange_cafe_cover.jpg",
+          "https://assets.funliday.com/posts/wp-content/uploads/2025/12/17170823/jeju_orange_cafe_4.jpg"
+        ]
+      },
+      {
+        "day": "4",
+        "date": "04/12 (日)",
+        "time": "14:00",
+        "type": "normal",
+        "location": "山房山油菜花田 산방산",
+        "landmark": "산방산",
+        "desc": "",
+        "drive": "🚗 車程：約 505 分鐘",
+        "photos": [
+          "https://voniblog.com/wp-content/uploads/thumb_20201019134218_44.jpg",
+          "https://jamesdiscover.tw/wp-content/uploads/2025/07/f1cd9b6bd413495de360d2e7e5181bd6.jpeg",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSAicH4u8sHiwdCGoA3E00mtvlb1KkWMyH32w&s"
+        ]
+      },
+      {
+        "day": "4",
+        "date": "04/12 (日)",
+        "time": "15:00",
+        "type": "normal",
+        "location": "龍頭海岸Yongmeori Coast 용머리해안",
+        "landmark": "용머리해안",
+        "desc": "花田旁邊、岩石海岸需看官方IG、穿好走鞋子。",
+        "drive": "🚗 車程：約 533 分鐘",
+        "photos": [
+          "https://image.cdn-eztravel.com.tw/hkSo5Ul8XKOQa5qYw0uZwgoSzu2YGZmPp8k4Vy48stY/g:ce/aHR0cHM6Ly92YWNhdGlvbi5jZG4tZXp0cmF2ZWwuY29tLnR3L3BvaS9LUi9DSlUvWW9uZ21lb3JpIENvYXN0L3NodXR0ZXJzdG9ja185OTg2ODUyOWNvbXByZXNzLmpwZw.jpg",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSomiUl7pqiJTb5CCJTSXierOM_WmRy5BA7Rg&s",
+          "https://dynamic-media-cdn.tripadvisor.com/media/photo-o/0f/02/5e/de/dsc-2322-largejpg.jpg?w=900&h=-1&s=1",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQJ9vfqqmAZZZzEIQDx7lNSM5JV2UQVC7D0fg&s"
+        ]
+      },
+      {
+        "day": "4",
+        "date": "04/12 (日)",
+        "time": "16:00",
+        "type": "normal",
+        "location": "阿爾特羅飛行場 알뜨르비행장",
+        "landmark": "알뜨르비행장",
+        "desc": "太平洋戰爭飛機庫遺跡。",
+        "drive": "🚗 車程：約 10 分鐘",
+        "photos": [
+          "https://resize-image.vocus.cc/resize?norotation=true&quality=80&url=https%3A%2F%2Fimages.vocus.cc%2F0cb9a974-b28f-48ed-9fa3-070cbb25ae70.jpeg&width=640&sign=6VRaRRhMgExlXxepClu4LPIYbUESmotiqlhx4fkp6bQ"
+        ]
+      },
+      {
+        "day": "4",
+        "date": "04/12 (日)",
+        "time": "17:00",
+        "type": "normal",
+        "location": "Dolphin Spot 신도포구",
+        "landmark": "신도포구",
+        "desc": "觀海豚點 日落。",
+        "drive": "🚗 車程：約 24 分鐘",
+        "photos": [
+          "data:image/jpeg;base64,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",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRX-EKHCGYU3Ej-sZdD_dCKhjB4Gb3VVPKhhw&s"
+        ]
+      },
+      {
+        "day": "4",
+        "date": "04/12 (日)",
+        "time": "18:30",
+        "type": "normal",
+        "location": "入住里奇酒店 Rich Hotel 리치호텔",
+        "landmark": "리치호텔",
+        "desc": "辦理入住並休息（位於涯月）。",
+        "drive": "🚗 車程：約 53 分鐘",
+        "photos": [
+          "https://lh3.googleusercontent.com/gps-proxy/ALd4DhF9BfTIdssR46pOe0OZYbrJ-ocAMu_ZHUUdHXtU0XWkLUejJ2Ptad7IjgutpsVhsxQjAFap6JHOcOGTVXWiOk8JXk1eMNAKnBBEz_t1iqPuvcwCKZTLk7VxB6NiAf90OLc_UrDKJJ1T-62MBJwmZW6KBxBdp9HUsBPVdqaZtnylCgPjFLxGLv0QeQ=w324-h312-n-k-no"
+        ]
+      },
+      {
+        "day": "4",
+        "date": "04/12 (日)",
+        "time": "19:00",
+        "type": "dinner",
+        "location": "辣燉白帶魚 해녀세자매",
+        "landmark": "해녀세자매",
+        "desc": "震撼的長型盤燉魚料理。",
+        "drive": "🚗 車程：約 18 分鐘",
+        "photos": [
+          "https://smallchin.com/wp-content/uploads/2019/07/DSC06099.jpg",
+          "https://ericgo.com/wp-content/uploads/20221218204628_83.jpg"
+        ]
+      },
+      {
+        "day": "5",
+        "date": "04/13 (一)",
+        "time": "09:00",
+        "type": "breakfast",
+        "location": "Doreureu Gimbap 도르르김밥",
+        "landmark": "도르르김밥",
+        "desc": "open at 7am。",
+        "drive": "🚗 車程：約 11 分鐘",
+        "photos": [
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT83Zkx93oOwe8T3Bu2y2zZP5pjICtWsjd8yA&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcR9FI4ZD0sAa5jyf77YlcGBgkbEL9g-1U09gg&s",
+          "https://voniblog.com/wp-content/uploads/pixnet/3621d9459ab168a5f70fb6f8cbc96dbc.jpg",
+          "https://voniblog.com/wp-content/uploads/pixnet/7dc8c6fa130e46267c0461cd6fdb7996.jpg"
+        ]
+      },
+      {
+        "day": "5",
+        "date": "04/13 (一)",
+        "time": "10:00",
+        "type": "normal",
+        "location": "翰林公園 & 仙人掌路 한림공원",
+        "landmark": "한림공원",
+        "desc": "鐘乳石洞與熱帶植物園。",
+        "drive": "🚗 車程：約 16 分鐘",
+        "photos": [
+          "data:image/jpeg;base64,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",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRq9LGsyfe5MyJNA6tb3l7nldA_EIqTjOwvMw&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRW1HOA7YT6gAj5Ol5QoW2JcTjkzkAb1XKvXw&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRigYTVfCbOB7hsQbnIMIfoazkK9jgFa8U-Ng&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSV_jyPHdNMBvMKxUSQuojXr2sfbj9NVu0hgw&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTQLPBUQGmm5pTnP6P5Vj-LooKFCzCR6gZIqw&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRqw9vjrgJNqeoH80haKiEXIRU3_mSPxurWCA&s",
+          "https://tong.visitkorea.or.kr/cms/resource/98/1618498_image2_1.jpg"
+        ]
+      },
+      {
+        "day": "5",
+        "date": "04/13 (一)",
+        "time": "11:00",
+        "type": "lunch",
+        "location": "Assisi Cafe (海洋香水) 아시시",
+        "landmark": "제주특별자치도 제주시 애월읍 고내로11길 18",
+        "desc": "調製專屬海洋記憶香水（里奇酒店附近）。",
+        "drive": "🚗 車程：約 25 分鐘",
+        "photos": [
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTsG4yEjZfnAyEGK1iGmU_SkexxBssUoZQPcw&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRhHe3VGEE21IbaPelaWp-MX6oEfOyIlb8jnw&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTt_BH8NEFjp9OfmrxYG4eu_uCwhlOGxv4L7Q&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTdpHwjbgytsxLSIm0fRp6PAykGj3rnWfOqBQ&s"
+        ]
+      },
+      {
+        "day": "5",
+        "date": "04/13 (一)",
+        "time": "14:30",
+        "type": "normal",
+        "location": "挾才海邊 협재해수욕장",
+        "landmark": "협재해수욕장",
+        "desc": "潔白沙灘與漸層海水。",
+        "drive": "🚗 車程：約 24 分鐘",
+        "photos": [
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTrezCabzCehFi4cUFphWNwj-G_HLX4T9LWSw&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRBIOBJYqfIxG94h9GZQNQGb02uHLyC1KsRxw&s",
+          "https://image.cdn-eztravel.com.tw/ltlCCxDc34tgqP83YnMjx_j2TEWYpZGz0GXG6wRDyj4/g:ce/aHR0cHM6Ly92YWNhdGlvbi5jZG4tZXp0cmF2ZWwuY29tLnR3L3BvaS9LUi9DSlUvSHllb3BqYWUgQmVhY2gvc2h1dHRlcnN0b2NrXzE4MTg1OTkxNWNvbXByZXNzLmpwZw.jpg",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQhbnAH8DiGEXa8cw2KqGMrMCn1GHXFSMFKgQ&s",
+          "https://img.trippose.com/thum/1021831/800/533"
+        ]
+      },
+      {
+        "day": "5",
+        "date": "04/13 (一)",
+        "time": "18:00",
+        "type": "normal",
+        "location": "Haejigae Cafe Tea 해지개",
+        "landmark": "해지개",
+        "desc": "韓屋風咖啡廳賞夕陽。",
+        "drive": "🚗 車程：約 20 分鐘",
+        "photos": [
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRNabCKi5B9-r5DZZymHEbD4Q0L9BuSz5PXFw&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQJ3KECg3bzFb_6xt455NO_G_QRLhoN61R_fw&s",
+          "https://lh3.googleusercontent.com/places/ANXAkqGdlImc_byVWYjl8X7C20d-RCL-n2TYacb2kBRuE4uuz2HY_KQgXE3MqZ3TER9mDoFHSdAnO9f1tB1ha3oXcJDEEuGgH1c5Uwk=s1600-w480"
+        ]
+      },
+      {
+        "day": "5",
+        "date": "04/13 (一)",
+        "time": "19:00",
+        "type": "dinner",
+        "location": "醬油蟹 이게밥도둑",
+        "landmark": "이게밥도둑",
+        "desc": "",
+        "drive": "🚗 車程：約 34 分鐘",
+        "photos": [
+          "https://pimg.1px.tw/alicecci09/1742650594-209695460-g.jpg",
+          "https://pimg.1px.tw/alicecci09/1742650563-3105675842-g.jpg",
+          "https://pimg.1px.tw/alicecci09/1742650585-9930091-g.jpg"
+        ]
+      },
+      {
+        "day": "5",
+        "date": "04/13 (一)",
+        "time": "21:00",
+        "type": "normal",
+        "location": "Shopping 伴手禮 하이제주",
+        "landmark": "하이제주",
+        "desc": "Hijeju、LotteMark close at 11。",
+        "drive": "🚗 車程：約 1 分鐘",
+        "photos": [
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQpCq_-mYMnkQx3xzUU4GpeGIfbmcQT6DCo5w&s",
+          "https://alinalife.tw/wp-content/uploads/2014/01/jeju-lottemart-old.jpg"
+        ]
+      },
+      {
+        "day": "6",
+        "date": "04/14 (二)",
+        "time": "10:30",
+        "type": "normal",
+        "location": "Mumu Jeju 選物店 무무제주",
+        "landmark": "무무제주",
+        "desc": "購買可愛的濟州文創周邊。",
+        "drive": "🚗 車程：約 13 分鐘",
+        "photos": [
+          "https://tingandkao.com/wp-content/uploads/2024/06/20241218-310vo.jpg",
+          "https://tingandkao.com/wp-content/uploads/2024/06/20241218-spjgr.jpg",
+          "https://tingandkao.com/wp-content/uploads/2024/06/20241218-096d2.jpg",
+          "https://tingandkao.com/wp-content/uploads/2024/06/20241218-jm5pk.jpg",
+          "https://tingandkao.com/wp-content/uploads/2024/06/20241218-5lxb4.jpg"
+        ]
+      },
+      {
+        "day": "6",
+        "date": "04/14 (二)",
+        "time": "12:00",
+        "type": "lunch",
+        "location": "匠人之家 (涯月本店) 장인의집",
+        "landmark": "장인의집",
+        "desc": "特色四色手工餃子火鍋。",
+        "drive": "🚗 車程：約 11 分鐘",
+        "photos": [
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcStC3JlNGUfFz9jP2V2G37rUMyasFF-MbLTqw&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQBHDjb0zZ7zciEQN3oBYNi5mnrrVjpXpM3BQ&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ5zs2t2Srhq--Iz86F1df1iq62MCgAeTLuRg&s"
+        ]
+      },
+      {
+        "day": "6",
+        "date": "04/14 (二)",
+        "time": "14:00",
+        "type": "normal",
+        "location": "涯月海岸路散步 애월해안도로",
+        "landmark": "애월해안도로",
+        "desc": "漫步最美海岸公路。",
+        "drive": "🚗 車程：約 8 分鐘",
+        "photos": [
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcR5EoNV262a7jDE_06BjvkFJTTdbrp5YulRig&s",
+          "https://i1.wp.com/journey.tw/wp-content/uploads/2023-04-22-115713-5.jpg?ssl=1",
+          "https://i2.wp.com/journey.tw/wp-content/uploads/2023-04-22-115718-31.jpg?ssl=1"
+        ]
+      },
+      {
+        "day": "6",
+        "date": "04/14 (二)",
+        "time": "15:00",
+        "type": "normal",
+        "location": "長田里櫻花道 장전리벚꽃길",
+        "landmark": "장전리벚꽃길",
+        "desc": "深入了解濟州歷史與民俗。",
+        "drive": "🚗 車程：約 6 分鐘",
+        "photos": [
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQPj0Zw1F0KegZqL-uOI8cSywy59WP2eOLoHw&s",
+          "https://lilytogo.com/wp-content/uploads/2017/02/20190402_i050.jpg",
+          "https://static.liontech.com.tw/GitzAPData/PublicationStatic/_ModelFile/ImageText/5192846/178fd4a660024d25970dd41fa3d0a25c.jpg",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ9dnQY60Pa8HI7MvQr4Q7sugVbLhXOnPIy1g&s"
+        ]
+      },
+      {
+        "day": "6",
+        "date": "04/14 (二)",
+        "time": "17:00",
+        "type": "normal",
+        "location": "Flowave Cafe 熔岩落火咖啡廳 플로웨이브",
+        "landmark": "플로웨이브",
+        "desc": "欣賞傍晚絕美的落火表演。",
+        "drive": "🚗 車程：約 20 分鐘",
+        "photos": [
+          "https://jasonslife.tw/wp-content/uploads/2025/11/batch_DSC08040-51-scaled.jpg",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQcfCUPz1f8V_HaIr7CgesaTwxxxysymjcUOg&s",
+          "https://jasonslife.tw/wp-content/uploads/2025/11/batch_DSC08083-64-scaled.jpg",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQKBBkOAHyIgHHSB2GNzxOwA3GEpZxwZn5U9w&s",
+          "https://i0.wp.com/www.kedblog.com/wp-content/uploads/2024/11/signal-2024-11-06-123534_006.jpg?resize=1000%2C551&ssl=1",
+          "https://jasonslife.tw/wp-content/uploads/2025/11/batch_DSC08066-61-scaled.jpg"
+        ]
+      },
+      {
+        "day": "6",
+        "date": "04/14 (二)",
+        "time": "18:30",
+        "type": "dinner",
+        "location": "展望黑豬肉、生魚片大餐 전망좋은횟집&흑돼지",
+        "landmark": "전망좋은횟집&흑돼지",
+        "desc": "最後一舞",
+        "drive": "🚗 車程：約 118 分鐘",
+        "photos": [
+          "https://media.tel-co.net/isr/uploads/04_1f2778658e.jpg?w=720",
+          "https://d12zq4w4guyljn.cloudfront.net/750_750_20240602025139756_photo_3d74fbb4a58c.webp",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcR95Tpw-HiHVyQlMqmYw_2hYv3TT9tDUJKg6g&s"
+        ]
+      },
+      {
+        "day": "6",
+        "date": "04/14 (二)",
+        "time": "20:30",
+        "type": "normal",
+        "location": "BHC炸雞 (涯月店) BHC치킨 제주애월점",
+        "landmark": "BHC치킨 제주애월점",
+        "desc": "外帶回飯店或現場享用炸雞。",
+        "drive": "🚗 車程：約 111 分鐘",
+        "photos": [
+          "https://live.staticflickr.com/65535/54564331932_e5d910308f_b.jpg",
+          "https://live.staticflickr.com/65535/54564331947_c07000bab6_b.jpg",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTi96a818mJajk9Uhweuhn6V-ZPvVgQx2bHXQ&s"
+        ]
+      },
+      {
+        "day": "7",
+        "date": "04/15 (三)",
+        "time": "10:30",
+        "type": "normal",
+        "location": "退房 기린빌라리조트",
+        "landmark": "",
+        "desc": "離開里奇酒店 (Hotel Rich)。",
+        "drive": "🚗 車程：約 62 分鐘",
+        "photos": []
+      },
+      {
+        "day": "7",
+        "date": "04/15 (三)",
+        "time": "11:30",
+        "type": "lunch",
+        "location": "東門市場採買 동문재래시장",
+        "landmark": "동문재래시장",
+        "desc": "最後的市區逛街購物。",
+        "drive": "🚗 車程：約 46 分鐘",
+        "photos": [
+          "https://dailycheska.com/wp-content/uploads/02-%E6%BF%9F%E5%B7%9E%E6%9D%B1%E9%96%80%E5%B8%82%E5%A0%B4%E5%85%A7%E9%83%A8%E5%AF%A6%E6%8B%8D.jpg"
+        ]
+      },
+      {
+        "day": "7",
+        "date": "04/15 (三)",
+        "time": "16:00",
+        "type": "normal",
+        "location": "大型超市採買 롯데마트 제주점",
+        "landmark": "롯데마트 제주점",
+        "desc": "Lotte Mart 或 E-mart 補貨。",
+        "drive": "🚗 車程：約 35 分鐘",
+        "photos": [
+          "https://img.poibank.com/PjJhUq8eAbkkR8Z5NKXx10ravQI=/W3siZm9ybWF0IjoianBnIn0seyJrZXkiOiJzdWdnZXN0aW9uLzI2Nzc5NDA2LzMzMjEzNzUvMTY2NjU4NjkzNjc4MSJ9LHsicmVzaXplIjp7IndpZHRoIjoiMTA4MCJ9fV0=",
+          "https://www.hanchao.com/varimg/photogallery/Article_Photo/982/big_317563.jpg"
+        ]
+      },
+      {
+        "day": "7",
+        "date": "04/15 (三)",
+        "time": "17:00",
+        "type": "normal",
+        "location": "Cafe Namonamo 카페나모나모",
+        "landmark": "카페나모나모",
+        "desc": "機場附近看夕陽。",
+        "drive": "🚗 車程：約 45 分鐘",
+        "photos": [
+          "https://media-cdn.tripadvisor.com/media/photo-s/1b/45/67/81/photo0jpg.jpg"
+        ]
+      },
+      {
+        "day": "7",
+        "date": "04/15 (三)",
+        "time": "18:30",
+        "type": "dinner",
+        "location": "熟成到(濟州總店) 숙성도 노형본관",
+        "landmark": "숙성도 노형본관",
+        "desc": "吃黑豬肉 或明浩安東牛助 烤韓牛/生牛，",
+        "drive": "🚗 車程：約 6 分鐘",
+        "photos": [
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTBWGFrsex7qWetmg3cUqYYxkGT86Sl00X2Tw&s",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQlKjO1Cy6O0lsB6Ve7OZ6zP77V6ScRkFl0Iw&s",
+          "https://static.popdaily.com.tw/u/202410/d524c401-a254-4a26-b35b-e4a2a102f259.jpeg",
+          "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ3dht1qrJ8y8Vo-sh-avnKxbl2thu7pbkafQ&s"
+        ]
+      },
+      {
+        "day": "7",
+        "date": "04/15 (三)",
+        "time": "20:00",
+        "type": "normal",
+        "location": "Lotte Rent-a-car 還車 롯데렌터카 제주오토하우스",
+        "landmark": "롯데렌터카 제주오토하우스",
+        "desc": "辦理還車手續。",
+        "drive": "🚗 車程：約 5 分鐘",
+        "photos": []
+      },
+      {
+        "day": "7",
+        "date": "04/15 (三)",
+        "time": "20:30",
+        "type": "normal",
+        "location": "抵達機場報到 제주국제공항",
+        "landmark": "제주국제공항",
+        "desc": "辦理登機。",
+        "drive": "🚗 車程：約 2 分鐘",
+        "photos": []
+      },
+      {
+        "day": "7",
+        "date": "04/15 (三)",
+        "time": "22:15",
+        "location": "班機起飛",
+        "desc": "離開濟州島。",
+        "type": "normal",
+        "drive": "",
+        "landmark": "",
+        "photos": []
+      }
+    ];
+
+    // ========== JSONBin.io 雲端同步憑證 ==========
+    const JSONBIN_ID = '69d0487faaba882197c19497';
+    const KAKAO_REST_KEY = '64ae3965ac425d8601fcd9475201e83d';
+    const JSONBIN_KEY = '$2a$10$goZB8GZsGH.aO5D2R5o2qOtHecykUn9J12rI.uAMT41K4wv3casDC';
+
+    // 從 localStorage 載入，若無則用預設資料
+    let itineraryData = (function() {
+        try {
+            const saved = localStorage.getItem('jejuItinerary');
+            if (saved) return JSON.parse(saved);
+        } catch(e) {}
+        return JSON.parse(JSON.stringify(defaultItineraryData));
+    })();
+
+    // 儲存到 localStorage
+    function saveToStorage() {
+        try { localStorage.setItem('jejuItinerary', JSON.stringify(itineraryData)); } catch(e) {}
+    }
+
+    // ========== Toast 提示 ==========
+    let _toastTimer = null;
+    function showToast(msg, isSticky = false) {
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.classList.add('visible');
+        clearTimeout(_toastTimer);
+        if (!isSticky) _toastTimer = setTimeout(() => t.classList.remove('visible'), 2500);
+    }
+    function hideToast() { document.getElementById('toast').classList.remove('visible'); }
+
+    // ========== JSONBin.io 雲端同步 ==========
+    function setCloudBtns(disabled) {
+        document.getElementById('btn-cloud-save').disabled = disabled;
+        document.getElementById('btn-cloud-load').disabled = disabled;
+    }
+
+    async function saveToCloud() {
+        setCloudBtns(true);
+        showToast('雲端同步中，請稍候...', true);
+        try {
+            const res = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_ID}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_KEY },
+                body: JSON.stringify(itineraryData)
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            showToast('雲端同步成功！');
+        } catch (e) {
+            showToast('雲端儲存失敗：' + e.message);
+        } finally {
+            setCloudBtns(false);
+        }
+    }
+
+    async function loadFromCloud() {
+        setCloudBtns(true);
+        showToast('雲端同步中，請稍候...', true);
+        try {
+            const res = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_ID}/latest`, {
+                headers: { 'X-Master-Key': JSONBIN_KEY }
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            itineraryData = data.record;
+            saveToStorage();
+            renderItinerary();
+            recalcAllDrives();
+            showToast('雲端載入成功！');
+        } catch (e) {
+            showToast('雲端載入失敗：' + e.message);
+        } finally {
+            setCloudBtns(false);
+        }
+    }
+
+    // ========== 天氣系統（Open-Meteo API） ==========
+    let weatherData = {}; // key: "2025-04-09T08" => {temp, icon, rain}
+
+    // WMO 天氣代碼轉圖示與中文
+    function weatherCodeToInfo(code) {
+        const map = {
+            0: ['☀️','晴天'], 1: ['🌤','大致晴'], 2: ['⛅','多雲'], 3: ['☁️','陰天'],
+            45: ['🌫','霧'], 48: ['🌫','凍霧'],
+            51: ['🌦','小毛雨'], 53: ['🌦','毛雨'], 55: ['🌧','密毛雨'],
+            61: ['🌧','小雨'], 63: ['🌧','中雨'], 65: ['🌧️','大雨'],
+            71: ['🌨','小雪'], 73: ['🌨','中雪'], 75: ['❄️','大雪'],
+            77: ['🌨','霰'], 80: ['🌦','陣雨'], 81: ['🌧','中陣雨'], 82: ['⛈','強陣雨'],
+            85: ['🌨','小陣雪'], 86: ['❄️','大陣雪'],
+            95: ['⛈','雷暴'], 96: ['⛈','雷暴+冰雹'], 99: ['⛈','強雷暴+冰雹']
+        };
+        return map[code] || ['🌡','未知'];
+    }
+
+    // 從行程日期欄位解析出 ISO 日期（自動使用當前或下一個合理年份）
+    function parseDateField(dateStr) {
+        const m = dateStr.match(/(\d{2})\/(\d{2})/);
+        if (!m) return null;
+        const now = new Date();
+        const month = parseInt(m[1], 10);
+        const day = parseInt(m[2], 10);
+        let year = now.getFullYear();
+        // 如果該日期今年已過超過 2 個月，視為明年
+        const candidate = new Date(year, month - 1, day);
+        if (candidate < now && (now - candidate) > 60 * 86400000) {
+            year++;
+        }
+        return `${year}-${m[1]}-${m[2]}`;
+    }
+
+    // 取得行程涵蓋的日期範圍
+    function getDateRange() {
+        let dates = [];
+        itineraryData.forEach(item => {
+            const d = parseDateField(item.date);
+            if (d && !dates.includes(d)) dates.push(d);
+        });
+        dates.sort();
+        return dates.length > 0 ? { start: dates[0], end: dates[dates.length - 1] } : null;
+    }
+
+    // 呼叫 Open-Meteo API
+    async function fetchWeather() {
+        const range = getDateRange();
+        if (!range) return;
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=33.50&longitude=126.53&hourly=temperature_2m,weather_code,precipitation_probability&timezone=Asia/Seoul&start_date=${range.start}&end_date=${range.end}`;
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            if (!data.hourly) return;
+            const times = data.hourly.time;
+            const temps = data.hourly.temperature_2m;
+            const codes = data.hourly.weather_code;
+            const rains = data.hourly.precipitation_probability;
+            weatherData = {};
+            for (let i = 0; i < times.length; i++) {
+                // key 格式: "2025-04-09T08"（取到小時）
+                const key = times[i].substring(0, 13);
+                weatherData[key] = {
+                    temp: Math.round(temps[i]),
+                    code: codes[i],
+                    rain: rains[i] != null ? rains[i] : null
+                };
+            }
+            renderItinerary();
+        } catch (e) {
+            console.warn('天氣資料取得失敗：', e);
+        }
+    }
+
+    // 取得某行程的天氣 HTML
+    function getWeatherHtml(item) {
+        const isoDate = parseDateField(item.date);
+        if (!isoDate) return '';
+        // 取得最接近的整點
+        const timeParts = item.time.match(/(\d{1,2}):(\d{2})/);
+        if (!timeParts) return '';
+        const hour = timeParts[1].padStart(2, '0');
+        const key = `${isoDate}T${hour}`;
+        const w = weatherData[key];
+        if (!w) return '';
+        const [icon, desc] = weatherCodeToInfo(w.code);
+        const rainStr = w.rain != null ? ` 💧${w.rain}%` : '';
+        return `<span class="weather"><span class="weather-icon">${icon}</span> ${w.temp}°C ${desc}${rainStr}</span>`;
+    }
+
+    // ========== 渲染行程 ==========
+    let itineraryLocations = [];
+    let coordsCache = {};
+
+    function renderItinerary() {
+        const display = document.getElementById('itineraryDisplay');
+        itineraryLocations = itineraryData.map(e => e.location);
+        let html = '';
+        let currentDay = null;
+
+        itineraryData.forEach((item, idx) => {
+            if (item.day !== currentDay) {
+                if (currentDay !== null) html += '</div></div>';
+                currentDay = item.day;
+                html += `<div class="day-group">
+                    <div class="day-header">
+                        <span>第 ${item.day} 天 - ${item.date}</span>
+                        <div class="day-header-actions">
+                            <button onclick="openDayMap('${item.day}')">地圖總覽</button>
+                            <button onclick="addEventToDay('${item.day}','${item.date.replace(/'/g,"\\'")}')">+ 新增</button>
+                        </div>
+                    </div>
+                    <div class="day-body">`;
+            }
+            const locEsc = item.location.replace(/'/g, "\\'");
+            const weatherHtml = getWeatherHtml(item);
+            const itemType = item.type || 'normal';
+            const mealClass = itemType !== 'normal' ? ` meal-${itemType}` : '';
+            const mealLabels = { breakfast: '🍳 早餐', lunch: '🍱 午餐', dinner: '🌙 晚餐' };
+            const mealTag = mealLabels[itemType] ? `<span class="meal-tag meal-tag-${itemType}">${mealLabels[itemType]}</span>` : '';
+            html += `
+                <div class="event-card${mealClass}">
+                    <div class="time">${item.time}</div>
+                    <div class="content">
+                        <div class="location" onclick="openMap('${locEsc}', ${idx})">${item.location}</div>${mealTag}
+                        <div class="desc">${item.desc}</div>
+                        ${item.drive ? `<div class="drive">${item.drive}</div>` : ''}${weatherHtml}
+                    </div>
+                    <div class="event-actions">
+                        ${(item.photos && item.photos.length > 0) ? `<button class="btn-edit btn-photo" onclick="openPhotoViewer(${idx})">照片</button>` : ''}
+                        <button class="btn-edit" onclick="editEvent(${idx})">編輯</button>
+                        <button class="btn-delete" onclick="deleteEvent(${idx})">刪除</button>
+                    </div>
+                </div>`;
+        });
+        if (currentDay !== null) html += '</div></div>';
+        display.innerHTML = html;
+        initScrollReveal();
+    }
+
+    // ========== Scroll Reveal ==========
+    function initScrollReveal() {
+        const cards = document.querySelectorAll('.event-card');
+        if (!('IntersectionObserver' in window)) { cards.forEach(c => c.classList.add('revealed')); return; }
+        const obs = new IntersectionObserver(entries => {
+            entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('revealed'); obs.unobserve(e.target); } });
+        }, { threshold: 0.15 });
+        cards.forEach(c => obs.observe(c));
+    }
+
+    // ========== 深色/淺色模式切換 ==========
+    function applyTheme(dark) {
+        document.documentElement.classList.toggle('dark', dark);
+        const btn = document.getElementById('btn-theme');
+        if (btn) btn.textContent = dark ? '☀️ 淺色模式' : '🌙 深色模式';
+    }
+    function toggleTheme() {
+        const isDark = !document.documentElement.classList.contains('dark');
+        localStorage.setItem('theme', isDark ? 'dark' : 'light');
+        applyTheme(isDark);
+    }
+    (function initTheme() {
+        const saved = localStorage.getItem('theme');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        applyTheme(saved ? saved === 'dark' : prefersDark);
+    })();
+
+    // ========== Dropdown 更多工具 ==========
+    function toggleDropdown(e) {
+        e.stopPropagation();
+        document.getElementById('toolsDropdown').classList.toggle('open');
+    }
+    function closeDropdown() { document.getElementById('toolsDropdown').classList.remove('open'); }
+    document.addEventListener('click', closeDropdown);
+
+    // ========== 天數與日期對應表 ==========
+    const dayDateMap = {
+        "1": "04/09 (三)", "2": "04/10 (四)", "3": "04/11 (五)",
+        "4": "04/12 (六)", "5": "04/13 (日)", "6": "04/14 (一)", "7": "04/15 (二)"
+    };
+
+    // 初始化時間下拉選單（每 30 分鐘一個選項）
+    (function initTimeSelect() {
+        const sel = document.getElementById('edit-time');
+        for (let h = 0; h < 24; h++) {
+            for (let m = 0; m < 60; m += 30) {
+                const val = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+                sel.innerHTML += `<option value="${val}">${val}</option>`;
+            }
+        }
+    })();
+
+    // 拆分地點為中文和韓文
+    function splitLocation(loc) {
+        // 找到第一個韓文字元的位置來拆分
+        const krIdx = loc.search(/[\uAC00-\uD7AF]/);
+        if (krIdx <= 0) return { zh: loc.trim(), kr: '' };
+        return { zh: loc.substring(0, krIdx).trim(), kr: loc.substring(krIdx).trim() };
+    }
+
+    // ========== 編輯/新增/刪除 ==========
+    let editingIdx = -1; // -1 = 新增模式
+
+    function editEvent(idx) {
+        editingIdx = idx;
+        const item = itineraryData[idx];
+        document.getElementById('edit-title').innerText = '編輯行程';
+        const loc = splitLocation(item.location);
+        document.getElementById('edit-day').value = item.day;
+        document.getElementById('edit-time').value = item.time;
+        document.getElementById('edit-type').value = item.type || 'normal';
+        document.getElementById('edit-location-zh').value = loc.zh;
+        document.getElementById('edit-location-kr').value = loc.kr;
+        document.getElementById('edit-landmark').value = item.landmark || '';
+        document.getElementById('edit-desc').value = item.desc;
+        document.getElementById('edit-photos').value = (item.photos || []).join('\n');
+
+        document.getElementById('editModal').style.display = 'block';
+    }
+
+    function addEvent() {
+        editingIdx = -1;
+        document.getElementById('edit-title').innerText = '新增行程';
+        document.getElementById('edit-day').value = '1';
+        document.getElementById('edit-time').value = '09:00';
+        document.getElementById('edit-type').value = 'normal';
+        document.getElementById('edit-location-zh').value = '';
+        document.getElementById('edit-location-kr').value = '';
+        document.getElementById('edit-landmark').value = '';
+        document.getElementById('edit-desc').value = '';
+        document.getElementById('edit-photos').value = '';
+
+        document.getElementById('editModal').style.display = 'block';
+    }
+
+    function addEventToDay(day, date) {
+        editingIdx = -1;
+        document.getElementById('edit-title').innerText = '新增行程（第 ' + day + ' 天）';
+        document.getElementById('edit-day').value = day;
+        document.getElementById('edit-time').value = '09:00';
+        document.getElementById('edit-type').value = 'normal';
+        document.getElementById('edit-location-zh').value = '';
+        document.getElementById('edit-location-kr').value = '';
+        document.getElementById('edit-landmark').value = '';
+        document.getElementById('edit-desc').value = '';
+        document.getElementById('edit-photos').value = '';
+
+        document.getElementById('editModal').style.display = 'block';
+    }
+
+    // 搜尋關鍵字優先級：landmark > 韓文地名 > 原始名稱
+    function getSearchQuery(locationName, landmark) {
+        if (landmark && landmark.trim()) return landmark.trim();
+        const kr = splitLocation(locationName).kr;
+        if (kr) return kr;
+        return locationName;
+    }
+
+    // 用 Kakao 搜尋地點座標（回傳 Promise）
+    function searchCoords(locationName, landmark) {
+        return new Promise(function(resolve) {
+            if (coordsCache[locationName]) {
+                resolve(coordsCache[locationName]);
+                return;
+            }
+            if (typeof kakao === 'undefined' || !kakao.maps) { resolve(null); return; }
+            if (!ps) ps = new kakao.maps.services.Places();
+            if (!geocoder) geocoder = new kakao.maps.services.Geocoder();
+            const query = getSearchQuery(locationName, landmark);
+            if (!query) { resolve(null); return; }
+
+            // 步驟一：Keyword Search
+            ps.keywordSearch(query, function(data, status) {
+                // 步驟二：關鍵字命中
+                if (status === kakao.maps.services.Status.OK && data.length > 0) {
+                    const coord = { lat: parseFloat(data[0].y), lng: parseFloat(data[0].x), name: data[0].place_name };
+                    coordsCache[locationName] = coord;
+                    resolve(coord);
+                    return;
+                }
+                // 步驟三：Fallback 到 Geocoder 地址搜尋
+                geocoder.addressSearch(query, function(addrData, addrStatus) {
+                    if (addrStatus === kakao.maps.services.Status.OK && addrData.length > 0) {
+                        const coord = { lat: parseFloat(addrData[0].y), lng: parseFloat(addrData[0].x), name: addrData[0].address_name };
+                        coordsCache[locationName] = coord;
+                        resolve(coord);
+                    } else {
+                        // 步驟四：雙引擎皆無結果
+                        resolve(null);
+                    }
+                });
+            });
+        });
+    }
+
+    // 找到某天的住宿地點（往回找最近一筆「入住」行程）
+    function findAccommodation(day) {
+        for (let i = itineraryData.length - 1; i >= 0; i--) {
+            const e = itineraryData[i];
+            if (parseInt(e.day) < parseInt(day) && /入住/.test(e.location)) {
+                return e.location;
+            }
+        }
+        return null;
+    }
+
+    // 自動計算與上一站的車程（單筆）
+    // 跨天時從住宿地點算起，同天則從上一筆行程算起
+    async function autoFillDrive(itemIdx) {
+        if (itemIdx <= 0) return;
+        const current = itineraryData[itemIdx];
+        const prev = itineraryData[itemIdx - 1];
+
+        let refLocation, refLandmark;
+        if (current.day !== prev.day) {
+            const hotel = findAccommodation(current.day);
+            refLocation = hotel || prev.location;
+            refLandmark = hotel ? '' : (prev.landmark || '');
+        } else {
+            refLocation = prev.location;
+            refLandmark = prev.landmark || '';
+        }
+
+        const [curCoord, refCoord] = await Promise.all([
+            searchCoords(current.location, current.landmark),
+            searchCoords(refLocation, refLandmark)
+        ]);
+        if (!curCoord || !refCoord) return;
+
+        // Kakao Mobility Directions API → Haversine fallback
+        try {
+            const url = `https://apis-navigator.kakaomobility.com/v1/directions?origin=${refCoord.lng},${refCoord.lat}&destination=${curCoord.lng},${curCoord.lat}&priority=RECOMMEND`;
+            const res = await fetch(url, {
+                headers: { 'Authorization': `KakaoAK ${KAKAO_REST_KEY}` }
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const section = data.routes[0].sections[0];
+            if (!section) throw new Error('No route data');
+            const duration = section.duration;
+            const distance = section.distance;
+            itineraryData[itemIdx].drive = `🚗 約 ${Math.round(duration / 60)} 分鐘 (${(distance / 1000).toFixed(1)}km)`;
+            return;
+        } catch (e) {
+            console.error('Kakao Mobility API failed, falling back to Haversine:', e.message);
+        }
+
+        // Haversine fallback
+        const distKm = haversineKm(refCoord.lat, refCoord.lng, curCoord.lat, curCoord.lng);
+        const estRoadKm = distKm * 1.3;
+        const estMinutes = Math.round(estRoadKm / 40 * 60);
+        if (estMinutes > 0) {
+            itineraryData[itemIdx].drive = `🚗 車程：約 ${estMinutes} 分鐘`;
+        }
+    }
+
+    // 重新計算所有行程車程
+    async function recalcAllDrives() {
+        for (let i = 1; i < itineraryData.length; i++) {
+            await autoFillDrive(i);
+        }
+        saveToStorage();
+        renderItinerary();
+    }
+
+    async function saveEvent() {
+        const dayVal = document.getElementById('edit-day').value;
+        const typeVal = document.getElementById('edit-type').value;
+        const photosRaw = document.getElementById('edit-photos').value.trim();
+        const photos = photosRaw ? photosRaw.split('\n').map(u => u.trim()).filter(u => u.length > 0) : [];
+        const item = {
+            day: dayVal,
+            date: dayDateMap[dayVal] || '',
+            time: document.getElementById('edit-time').value,
+            type: typeVal,
+            location: (document.getElementById('edit-location-zh').value.trim() + ' ' + document.getElementById('edit-location-kr').value.trim()).trim(),
+            landmark: document.getElementById('edit-landmark').value.trim(),
+            desc: document.getElementById('edit-desc').value.trim(),
+            drive: '',
+            photos: photos
+        };
+        if (!item.day || !item.time || !item.location.trim()) {
+            alert('天數、時間、地點（至少填一個語言）為必填欄位。');
+            return;
+        }
+
+        // 儲存前地標驗證
+        const query = getSearchQuery(item.location, item.landmark);
+        if (query) {
+            const saveBtn = document.querySelector('.btn-save');
+            saveBtn.disabled = true;
+            showToast('驗證地標中...', true);
+            try {
+                const coords = await searchCoords(query);
+                if (!coords) {
+                    showToast('❌ 無法定位此地標或地址，請檢查輸入內容！');
+                    return;
+                }
+            } finally {
+                saveBtn.disabled = false;
+                hideToast();
+            }
+        }
+        // 檢查同一天是否有重複的餐
+        if (typeVal !== 'normal') {
+            const mealNames = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐' };
+            const duplicate = itineraryData.some((e, i) =>
+                e.day === dayVal && e.type === typeVal && i !== editingIdx
+            );
+            if (duplicate) {
+                alert(`第 ${dayVal} 天已經有${mealNames[typeVal]}了，同一天不能有重複的餐！`);
+                return;
+            }
+        }
+
+        let savedIdx;
+        if (editingIdx >= 0) {
+            // 先移除舊的，再插入到正確位置
+            itineraryData.splice(editingIdx, 1);
+        }
+        {
+            let insertIdx = itineraryData.length;
+            for (let i = 0; i < itineraryData.length; i++) {
+                if (itineraryData[i].day > item.day) {
+                    insertIdx = i;
+                    break;
+                }
+                if (itineraryData[i].day === item.day && itineraryData[i].time > item.time) {
+                    insertIdx = i;
+                    break;
+                }
+            }
+            itineraryData.splice(insertIdx, 0, item);
+            savedIdx = insertIdx;
+        }
+        closeEdit();
+        saveToStorage();
+        renderItinerary();
+        recalcAllDrives();
+    }
+
+    function deleteEvent(idx) {
+        const item = itineraryData[idx];
+        if (confirm(`確定要刪除「${item.location}」嗎？`)) {
+            itineraryData.splice(idx, 1);
+            saveToStorage();
+            renderItinerary();
+            recalcAllDrives();
+        }
+    }
+
+    function resetData() {
+        if (confirm('確定要還原為預設行程嗎？所有修改將會清除。')) {
+            itineraryData = JSON.parse(JSON.stringify(defaultItineraryData));
+            saveToStorage();
+            renderItinerary();
+            fetchWeather();
+            recalcAllDrives();
+        }
+    }
+
+    // ========== 匯出/匯入 JSON ==========
+    function exportJSON() {
+        const blob = new Blob([JSON.stringify(itineraryData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = '濟州島行程_' + new Date().toISOString().slice(0, 10) + '.json';
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    function importJSON(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const data = JSON.parse(e.target.result);
+                if (!Array.isArray(data)) throw new Error('格式錯誤');
+                if (!confirm(`確定要匯入 ${data.length} 筆行程資料嗎？目前的行程將被覆蓋。`)) return;
+                itineraryData = data;
+                saveToStorage();
+                renderItinerary();
+                fetchWeather();
+                recalcAllDrives();
+                alert('匯入成功！');
+            } catch(err) {
+                alert('匯入失敗：檔案格式不正確。');
+            }
+        };
+        reader.readAsText(file);
+        event.target.value = '';
+    }
+
+    function closeEdit() {
+        document.getElementById('editModal').style.display = 'none';
+    }
+
+    // ========== 匯出 CSV ==========
+    function exportCSV() {
+        let csv = 'Day,Date,Time,Type,Location,Landmark,Description,DriveInfo,Photos\n';
+        itineraryData.forEach(item => {
+            const fields = [item.day, item.date, item.time, item.type || 'normal', item.location, item.landmark || '', item.desc, item.drive, (item.photos || []).join('; ')];
+            csv += fields.map(f => {
+                if (f.includes(',') || f.includes('"') || f.includes('\n')) {
+                    return '"' + f.replace(/"/g, '""') + '"';
+                }
+                return f;
+            }).join(',') + '\n';
+        });
+        const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'jeju_itinerary.csv';
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    // ========== 定位 ==========
+    let userLat = null, userLng = null;
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            function(pos) { userLat = pos.coords.latitude; userLng = pos.coords.longitude; },
+            function(err) { console.warn('無法取得定位：', err.message); }
+        );
+    }
+
+    // ========== 距離計算 ==========
+    function haversineKm(lat1, lng1, lat2, lng2) {
+        const R = 6371;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLng = (lng2 - lng1) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                  Math.sin(dLng/2) * Math.sin(dLng/2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    function formatDrive(distKm) {
+        const estRoadKm = distKm * 1.3;
+        const estMinutes = Math.round(estRoadKm / 40 * 60);
+        const hours = Math.floor(estMinutes / 60);
+        const mins = estMinutes % 60;
+        const timeStr = hours > 0 ? `${hours} 小時 ${mins} 分鐘` : `${mins} 分鐘`;
+        return { estRoadKm, timeStr };
+    }
+
+    function showDistanceInfo(destLat, destLng, placeName, locationIdx) {
+        const distInfo = document.getElementById('distance-info');
+        let html = '';
+
+        if (userLat !== null) {
+            const distKm = haversineKm(userLat, userLng, destLat, destLng);
+            const { estRoadKm, timeStr } = formatDrive(distKm);
+            const naviUrl = `https://map.kakao.com/link/to/${encodeURIComponent(placeName)},${destLat},${destLng}`;
+            html += `<div class="dist-block dist-current">
+                <div class="dist-row">
+                    <span>
+                        <span class="dist-label">📍 距離我目前位置：</span>${distKm.toFixed(1)} km
+                        &nbsp;|&nbsp;
+                        <span class="dist-label">🚗</span> ${timeStr}（約 ${estRoadKm.toFixed(1)} km）
+                    </span>
+                    <a href="${naviUrl}" target="_blank" rel="noopener noreferrer">🧭 導航</a>
+                </div>
+            </div>`;
+        } else {
+            html += '<div class="dist-block dist-current">⚠️ 無法取得您的位置，請允許瀏覽器定位權限。</div>';
+        }
+
+        if (locationIdx > 0) {
+            const prevLocation = itineraryLocations[locationIdx - 1];
+            if (coordsCache[prevLocation]) {
+                const prev = coordsCache[prevLocation];
+                const distKm = haversineKm(prev.lat, prev.lng, destLat, destLng);
+                const { estRoadKm, timeStr } = formatDrive(distKm);
+                const prevNaviUrl = `https://map.kakao.com/link/from/${encodeURIComponent(prev.name)},${prev.lat},${prev.lng}/to/${encodeURIComponent(placeName)},${destLat},${destLng}`;
+                html += `<div class="dist-block dist-prev">
+                    <div class="dist-row">
+                        <span>
+                            <span class="dist-label">⬆️ 距離上一站（${prevLocation}）：</span>${distKm.toFixed(1)} km
+                            &nbsp;|&nbsp;
+                            <span class="dist-label">🚗</span> ${timeStr}（約 ${estRoadKm.toFixed(1)} km）
+                        </span>
+                        <a href="${prevNaviUrl}" target="_blank" rel="noopener noreferrer">🧭 導航</a>
+                    </div>
+                </div>`;
+            } else {
+                html += `<div class="dist-block dist-prev" id="prev-dist-loading">
+                    <div class="dist-row">
+                        <span><span class="dist-label">⬆️ 距離上一站：</span>查詢中...</span>
+                    </div>
+                </div>`;
+                searchPrevLocation(prevLocation, destLat, destLng, placeName);
+            }
+        } else {
+            html += `<div class="dist-block dist-prev"><div class="dist-row"><span><span class="dist-label">⬆️</span> 這是第一站</span></div></div>`;
+        }
+
+        distInfo.innerHTML = html;
+        distInfo.style.display = 'block';
+    }
+
+    function searchPrevLocation(prevLocationName, destLat, destLng, destPlaceName) {
+        const prevItem = itineraryData.find(e => e.location === prevLocationName);
+        const query = getSearchQuery(prevLocationName, prevItem ? prevItem.landmark : '');
+        if (!query) return;
+        ps.keywordSearch(query, function(data, status) {
+            const el = document.getElementById('prev-dist-loading');
+            if (!el) return;
+            if (status === kakao.maps.services.Status.OK) {
+                const prevLat = parseFloat(data[0].y);
+                const prevLng = parseFloat(data[0].x);
+                coordsCache[prevLocationName] = { lat: prevLat, lng: prevLng, name: data[0].place_name };
+                const distKm = haversineKm(prevLat, prevLng, destLat, destLng);
+                const { estRoadKm, timeStr } = formatDrive(distKm);
+                const prevNaviUrl = `https://map.kakao.com/link/from/${encodeURIComponent(data[0].place_name)},${prevLat},${prevLng}/to/${encodeURIComponent(destPlaceName)},${destLat},${destLng}`;
+                el.innerHTML = `<div class="dist-row">
+                    <span>
+                        <span class="dist-label">⬆️ 距離上一站（${prevLocationName}）：</span>${distKm.toFixed(1)} km
+                        &nbsp;|&nbsp;
+                        <span class="dist-label">🚗</span> ${timeStr}（約 ${estRoadKm.toFixed(1)} km）
+                    </span>
+                    <a href="${prevNaviUrl}" target="_blank" rel="noopener noreferrer">🧭 導航</a>
+                </div>`;
+            } else {
+                el.innerHTML = `<div class="dist-row"><span><span class="dist-label">⬆️</span> 上一站座標查詢失敗</span></div>`;
+            }
+        });
+    }
+
+    // ========== Kakao Map ==========
+    let map;
+    let infowindow;
+    let ps;
+    let geocoder;
+    let pathLinePrev = null;
+    let pathLineUser = null;
+    let parkingMarkers = [];
+
+    async function drawRoute(origin, destination, color, strokeStyle, zIndex) {
+        try {
+            const url = `https://apis-navigator.kakaomobility.com/v1/directions?origin=${origin.lng},${origin.lat}&destination=${destination.lng},${destination.lat}&priority=RECOMMEND`;
+            const res = await fetch(url, { headers: { 'Authorization': `KakaoAK ${KAKAO_REST_KEY}` } });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const route = data.routes && data.routes[0];
+            if (!route || route.result_code !== 0) throw new Error('No route');
+            const linePath = [];
+            route.sections.forEach(sec => sec.roads.forEach(road => {
+                const v = road.vertexes;
+                for (let i = 0; i < v.length; i += 2) {
+                    linePath.push(new kakao.maps.LatLng(v[i + 1], v[i]));
+                }
+            }));
+            const polyline = new kakao.maps.Polyline({
+                map: map, path: linePath,
+                strokeWeight: 5, strokeColor: color,
+                strokeOpacity: 0.85, strokeStyle: strokeStyle || 'solid',
+                zIndex: zIndex || 0
+            });
+            return polyline;
+        } catch (e) {
+            console.warn('drawRoute failed:', e.message);
+            return null;
+        }
+    }
+
+    function clearRoutePaths() {
+        if (pathLinePrev) { pathLinePrev.setMap(null); pathLinePrev = null; }
+        if (pathLineUser) { pathLineUser.setMap(null); pathLineUser = null; }
+    }
+
+    function clearParkingMarkers() {
+        parkingMarkers.forEach(m => m.setMap(null));
+        parkingMarkers = [];
+    }
+
+    function findParking() {
+        if (!ps || !map) return;
+        clearParkingMarkers();
+        const center = map.getCenter();
+        ps.categorySearch('PK6', function(data, status) {
+            if (status !== kakao.maps.services.Status.OK) {
+                alert('附近找不到停車場資訊。');
+                return;
+            }
+            data.forEach(place => {
+                const pos = new kakao.maps.LatLng(place.y, place.x);
+                const content = document.createElement('div');
+                content.style.cssText = 'width:28px;height:28px;background:#007AFF;color:#fff;border-radius:8px;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.2);cursor:pointer;';
+                content.textContent = 'P';
+                const overlay = new kakao.maps.CustomOverlay({ map: map, position: pos, content: content, yAnchor: 1.3 });
+                const distM = place.distance ? `${place.distance}m` : '';
+                const naviUrl = `https://map.kakao.com/link/to/${encodeURIComponent(place.place_name)},${place.y},${place.x}`;
+                content.addEventListener('click', function() {
+                    infowindow.setContent(`<div style="padding:8px 12px;font-size:13px;color:#333;max-width:220px;line-height:1.4;"><strong>${place.place_name}</strong>${distM ? `<br><span style="color:#666;">距離：${distM}</span>` : ''}<br><a href="${naviUrl}" target="_blank" rel="noopener noreferrer" style="color:#007AFF;text-decoration:none;font-weight:600;">🧭 導航前往</a></div>`);
+                    infowindow.setPosition(pos);
+                    infowindow.open(map);
+                });
+                parkingMarkers.push(overlay);
+            });
+        }, { location: center, radius: 1000, sort: kakao.maps.services.SortBy.DISTANCE });
+    }
+
+    function openMap(locationName, locationIdx) {
+        if (typeof kakao === 'undefined' || typeof kakao.maps === 'undefined' || typeof kakao.maps.LatLng === 'undefined') {
+            alert('Kakao Maps SDK 載入失敗。');
+            return;
+        }
+        if (!infowindow) infowindow = new kakao.maps.InfoWindow({zIndex:1});
+        if (!ps) ps = new kakao.maps.services.Places();
+        const modal = document.getElementById('mapModal');
+        const mapTitle = document.getElementById('map-title');
+
+        mapTitle.innerText = "搜尋中：" + locationName;
+        modal.style.display = 'block';
+
+        setTimeout(function() {
+            const mapContainer = document.getElementById('map');
+            const mapOption = {
+                center: new kakao.maps.LatLng(33.3615, 126.5292),
+                level: 9
+            };
+            map = new kakao.maps.Map(mapContainer, mapOption);
+            map.relayout();
+
+            const itemData = itineraryData[locationIdx] || {};
+            const searchQuery = getSearchQuery(locationName, itemData.landmark);
+            document.getElementById('distance-info').style.display = 'none';
+            clearRoutePaths();
+            if (!searchQuery) { mapTitle.innerText = locationName + ' (無可搜尋關鍵字)'; return; }
+            ps.keywordSearch(searchQuery, function(data, status) {
+                if (status === kakao.maps.services.Status.OK) {
+                    mapTitle.innerText = locationName;
+                    const destLat = parseFloat(data[0].y);
+                    const destLng = parseFloat(data[0].x);
+                    const dest = { lat: destLat, lng: destLng };
+
+                    // 只顯示最精確的第一筆結果
+                    displayMarker(data[0]);
+                    map.setCenter(new kakao.maps.LatLng(destLat, destLng));
+                    map.setLevel(4);
+
+                    coordsCache[locationName] = { lat: destLat, lng: destLng, name: data[0].place_name };
+                    showDistanceInfo(destLat, destLng, data[0].place_name, locationIdx);
+                    document.getElementById('btn-parking').style.display = 'block';
+
+                    // 路徑繪製用 bounds
+                    const bounds = new kakao.maps.LatLngBounds();
+                    bounds.extend(new kakao.maps.LatLng(destLat, destLng));
+
+                    // 功能 A：上一站 → 目標點（藍色實線）
+                    if (locationIdx > 0) {
+                        const prevLocation = itineraryLocations[locationIdx - 1];
+                        const drawPrev = function(prevCoord) {
+                            bounds.extend(new kakao.maps.LatLng(prevCoord.lat, prevCoord.lng));
+                            drawRoute(prevCoord, dest, '#007AFF', 'solid', 10).then(line => { pathLinePrev = line; debounceFit(); });
+                        };
+                        if (coordsCache[prevLocation]) {
+                            drawPrev(coordsCache[prevLocation]);
+                        } else {
+                            searchCoords(prevLocation).then(c => { if (c) drawPrev(c); });
+                        }
+                    }
+
+                    // 功能 B：目前定位 → 目標點（紫色實線）
+                    if (userLat !== null) {
+                        const userCoord = { lat: userLat, lng: userLng };
+                        bounds.extend(new kakao.maps.LatLng(userLat, userLng));
+                        drawRoute(userCoord, dest, '#5856D6', 'solid', 20).then(line => { pathLineUser = line; debounceFit(); });
+                    }
+
+                    let _fitTimer = null;
+                    function debounceFit() { clearTimeout(_fitTimer); _fitTimer = setTimeout(() => map.setBounds(bounds), 200); }
+                } else {
+                    mapTitle.innerText = locationName + " (找不到精確座標)";
+                    alert(`Kakao API 無法找到「${locationName}」的座標。`);
+                }
+            });
+        }, 100);
+    }
+
+    function displayMarker(place) {
+        const marker = new kakao.maps.Marker({
+            map: map,
+            position: new kakao.maps.LatLng(place.y, place.x)
+        });
+        kakao.maps.event.addListener(marker, 'click', function() {
+            infowindow.setContent('<div style="padding:5px;font-size:12px;color:#333;">' + place.place_name + '</div>');
+            infowindow.open(map, marker);
+        });
+    }
+
+    // 取得每晚住宿地點（根據「入住」或「Check-in」事件推算）
+    function getNightAccommodation() {
+        const acc = {}; // day(number) -> location string
+        const checkIns = [];
+        itineraryData.forEach(item => {
+            if (item.location.includes('入住') || item.desc.includes('入住') || item.desc.includes('Check-in')) {
+                checkIns.push({ day: parseInt(item.day), location: item.location });
+            }
+        });
+        checkIns.sort((a, b) => a.day - b.day);
+        const maxDay = Math.max(...itineraryData.map(e => parseInt(e.day)));
+        let currentHotel = null;
+        for (let d = 1; d <= maxDay; d++) {
+            const ci = checkIns.find(c => c.day === d);
+            if (ci) currentHotel = ci.location;
+            if (currentHotel) acc[d] = currentHotel;
+        }
+        return acc;
+    }
+
+    // 當天所有行程地圖總覽
+    async function openDayMap(day) {
+        if (typeof kakao === 'undefined' || !kakao.maps) {
+            alert('Kakao Maps SDK 載入失敗。');
+            return;
+        }
+        if (!infowindow) infowindow = new kakao.maps.InfoWindow({zIndex:1});
+        if (!ps) ps = new kakao.maps.services.Places();
+        if (!geocoder) geocoder = new kakao.maps.services.Geocoder();
+
+        const dayItems = itineraryData.filter(e => e.day === day);
+        const dateStr = dayItems.length > 0 ? dayItems[0].date : '';
+        const modal = document.getElementById('mapModal');
+        const mapTitle = document.getElementById('map-title');
+        mapTitle.innerText = `第 ${day} 天 ${dateStr} — 全部行程`;
+        document.getElementById('distance-info').style.display = 'none';
+        modal.style.display = 'block';
+
+        await new Promise(r => setTimeout(r, 100));
+
+        const mapContainer = document.getElementById('map');
+        map = new kakao.maps.Map(mapContainer, {
+            center: new kakao.maps.LatLng(33.3615, 126.5292),
+            level: 10
+        });
+        map.relayout();
+
+        const bounds = new kakao.maps.LatLngBounds();
+        const colors = ['#FF3B30','#FF9500','#FFCC00','#34C759','#007AFF','#5856D6','#AF52DE','#FF2D55'];
+
+        const nightAcc = getNightAccommodation();
+        const dayNum = parseInt(day);
+        const startAccLoc = nightAcc[dayNum - 1] || null;
+        const endAccLoc = nightAcc[dayNum] || null;
+
+        const allPoints = [];
+        if (startAccLoc) allPoints.push({ label: '始', location: startAccLoc, landmark: '', isEndpoint: true, color: '#34C759' });
+        dayItems.forEach(function(item, i) {
+            const mealMarkerMap = { breakfast: '早', lunch: '午', dinner: '晚' };
+            const isMeal = item.type && mealMarkerMap[item.type];
+            allPoints.push({
+                label: isMeal ? mealMarkerMap[item.type] : String(i + 1),
+                location: item.location,
+                landmark: item.landmark || '',
+                isEndpoint: false,
+                isMeal: !!isMeal,
+                color: colors[i % colors.length],
+                time: item.time,
+                index: i
+            });
+        });
+        if (endAccLoc) allPoints.push({ label: '終', location: endAccLoc, landmark: '', isEndpoint: true, color: '#FF3B30' });
+
+        const linePath = [];
+
+        for (const [pi, point] of allPoints.entries()) {
+            const query = getSearchQuery(point.location, point.landmark);
+            if (!query) continue;
+
+            const coord = await searchCoords(point.location, point.landmark);
+            if (!coord) continue;
+
+            const pos = new kakao.maps.LatLng(coord.lat, coord.lng);
+
+            // 自訂標記
+            const markerContent = document.createElement('div');
+            if (point.isEndpoint) {
+                markerContent.style.cssText = `
+                    min-width:32px;padding:0 8px;border-radius:16px;height:32px;
+                    background:${point.color};color:#fff;
+                    display:flex;align-items:center;justify-content:center;
+                    font-size:14px;font-weight:800;
+                    border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.35);
+                    cursor:pointer;
+                `;
+            } else {
+                markerContent.style.cssText = `
+                    ${point.isMeal ? 'min-width:28px;padding:0 6px;border-radius:14px;' : 'width:28px;border-radius:50%;'}
+                    height:28px;
+                    background:${point.color};color:#fff;
+                    display:flex;align-items:center;justify-content:center;
+                    font-size:13px;font-weight:700;
+                    border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);
+                    cursor:pointer;
+                `;
+            }
+            markerContent.textContent = point.label;
+
+            new kakao.maps.CustomOverlay({
+                map: map, position: pos, content: markerContent,
+                yAnchor: 1.2
+            });
+
+            markerContent.addEventListener('click', function() {
+                const infoText = point.isEndpoint
+                    ? `<div style="padding:6px 10px;font-size:12px;color:#333;white-space:nowrap;"><b>[${point.label}]</b> ${point.location}</div>`
+                    : `<div style="padding:6px 10px;font-size:12px;color:#333;white-space:nowrap;"><b>${point.index+1}.</b> ${point.time} ${point.location}</div>`;
+                infowindow.setContent(infoText);
+                infowindow.setPosition(pos);
+                infowindow.open(map);
+            });
+
+            bounds.extend(pos);
+            linePath.push(pos);
+        }
+
+        // 所有標記放置完成後，調整視野並畫路線
+        if (linePath.length > 0) map.setBounds(bounds);
+        if (linePath.length > 1) {
+            new kakao.maps.Polyline({
+                map: map, path: linePath,
+                strokeWeight: 3, strokeColor: '#007AFF',
+                strokeOpacity: 0.6, strokeStyle: 'shortdash'
+            });
+        }
+    }
+
+    function closeMap() {
+        clearRoutePaths();
+        clearParkingMarkers();
+        document.getElementById('btn-parking').style.display = 'none';
+        document.getElementById('mapModal').style.display = 'none';
+        document.getElementById('map').innerHTML = '';
+    }
+
+    // ========== 照片瀏覽器 ==========
+    let currentPhotos = [];
+    let currentPhotoIdx = 0;
+    let currentEventIdx = -1;
+
+    function openPhotoViewer(idx) {
+        const item = itineraryData[idx];
+        const photos = item.photos || [];
+        if (photos.length === 0) return;
+        currentPhotos = photos;
+        currentPhotoIdx = 0;
+        currentEventIdx = idx;
+        showPhoto();
+        updateEventNav();
+        document.getElementById('photoViewer').classList.add('active');
+    }
+
+    function showPhoto() {
+        const img = document.getElementById('photoViewerImg');
+        img.src = currentPhotos[currentPhotoIdx];
+        document.getElementById('photoCounter').textContent = `${currentPhotoIdx + 1} / ${currentPhotos.length}`;
+    }
+
+    function photoNav(dir) {
+        currentPhotoIdx = (currentPhotoIdx + dir + currentPhotos.length) % currentPhotos.length;
+        showPhoto();
+    }
+
+    // 找到有照片的上一個/下一個行程
+    function findEventWithPhotos(fromIdx, dir) {
+        let i = fromIdx + dir;
+        while (i >= 0 && i < itineraryData.length) {
+            if (itineraryData[i].photos && itineraryData[i].photos.length > 0) return i;
+            i += dir;
+        }
+        return -1;
+    }
+
+    function updateEventNav() {
+        const prevIdx = findEventWithPhotos(currentEventIdx, -1);
+        const nextIdx = findEventWithPhotos(currentEventIdx, 1);
+        const prevBtn = document.querySelector('.photo-event-prev');
+        const nextBtn = document.querySelector('.photo-event-next');
+        prevBtn.disabled = prevIdx === -1;
+        nextBtn.disabled = nextIdx === -1;
+        if (prevIdx >= 0) {
+            const p = itineraryData[prevIdx];
+            prevBtn.innerHTML = `&#9650; Day${p.day} ${p.time} ${p.location}`;
+        } else {
+            prevBtn.innerHTML = '&#9650; 沒有更多行程';
+        }
+        if (nextIdx >= 0) {
+            const n = itineraryData[nextIdx];
+            nextBtn.innerHTML = `&#9660; Day${n.day} ${n.time} ${n.location}`;
+        } else {
+            nextBtn.innerHTML = '&#9660; 沒有更多行程';
+        }
+        const cur = itineraryData[currentEventIdx];
+        document.getElementById('photoEventLabel').textContent = `第 ${cur.day} 天 ${cur.date} ${cur.time} — ${cur.location}`;
+    }
+
+    function photoEventNav(dir) {
+        const targetIdx = findEventWithPhotos(currentEventIdx, dir);
+        if (targetIdx === -1) return;
+        currentEventIdx = targetIdx;
+        currentPhotos = itineraryData[targetIdx].photos;
+        currentPhotoIdx = 0;
+        showPhoto();
+        updateEventNav();
+    }
+
+    function closePhotoViewer() {
+        document.getElementById('photoViewer').classList.remove('active');
+    }
+
+    // 鍵盤控制：左右切換照片、上下切換行程、ESC 關閉
+    document.addEventListener('keydown', function(e) {
+        const viewer = document.getElementById('photoViewer');
+        if (!viewer.classList.contains('active')) return;
+        if (e.key === 'ArrowLeft') photoNav(-1);
+        else if (e.key === 'ArrowRight') photoNav(1);
+        else if (e.key === 'ArrowUp') { e.preventDefault(); photoEventNav(-1); }
+        else if (e.key === 'ArrowDown') { e.preventDefault(); photoEventNav(1); }
+        else if (e.key === 'Escape') closePhotoViewer();
+    });
+
+    // 觸控滑動：左右切換照片、上下切換行程
+    (function() {
+        const viewer = document.getElementById('photoViewer');
+        let startX = 0, startY = 0;
+        viewer.addEventListener('touchstart', function(e) {
+            startX = e.changedTouches[0].clientX;
+            startY = e.changedTouches[0].clientY;
+        }, { passive: true });
+        viewer.addEventListener('touchend', function(e) {
+            const dx = e.changedTouches[0].clientX - startX;
+            const dy = e.changedTouches[0].clientY - startY;
+            const absDx = Math.abs(dx), absDy = Math.abs(dy);
+            if (Math.max(absDx, absDy) < 40) return; // 太短忽略
+            if (absDx > absDy) {
+                photoNav(dx < 0 ? 1 : -1); // 左滑→下一張，右滑→上一張
+            } else {
+                dy < 0 ? photoEventNav(1) : photoEventNav(-1); // 上滑→下一行程，下滑→上一行程
+            }
+        }, { passive: true });
+    })();
+
+    window.onclick = function(event) {
+        if (event.target === document.getElementById('mapModal')) closeMap();
+        if (event.target === document.getElementById('editModal')) closeEdit();
+    }
+
+    // 初始渲染
+    renderItinerary();
+    fetchWeather();
+    recalcAllDrives();
+</script>
+
+</body>
+</html>
