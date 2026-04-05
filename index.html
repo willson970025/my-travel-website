@@ -8,7 +8,7 @@
         script-src 'self' 'unsafe-inline' 'unsafe-eval' https://dapi.kakao.com https://*.daumcdn.net https://*.kakao.com;
         style-src 'self' 'unsafe-inline';
         img-src 'self' data: blob: https:;
-        connect-src 'self' https://dapi.kakao.com https://*.kakao.com https://apis-navigator.kakaomobility.com https://api.jsonbin.io https://api.open-meteo.com https://*.daumcdn.net ws://127.0.0.1:* ws://localhost:* ws: wss:;
+        connect-src 'self' https://dapi.kakao.com https://*.kakao.com https://apis-navi.kakaomobility.com https://api.jsonbin.io https://api.open-meteo.com https://*.daumcdn.net ws://127.0.0.1:* ws://localhost:* ws: wss:;
         font-src 'self' data: https:;
         worker-src 'self' blob:;
     ">
@@ -1900,7 +1900,7 @@
 
         // Kakao Mobility Directions API → Haversine fallback
         try {
-            const url = `https://apis-navigator.kakaomobility.com/v1/directions?origin=${refCoord.lng},${refCoord.lat}&destination=${curCoord.lng},${curCoord.lat}&priority=RECOMMEND`;
+            const url = `https://apis-navi.kakaomobility.com/v1/directions?origin=${refCoord.lng},${refCoord.lat}&destination=${curCoord.lng},${curCoord.lat}&priority=RECOMMEND`;
             const res = await fetch(url, {
                 headers: { 'Authorization': `KakaoAK ${KAKAO_REST_KEY}` }
             });
@@ -2212,7 +2212,7 @@
 
     async function drawRoute(origin, destination, color, strokeStyle, zIndex) {
         try {
-            const url = `https://apis-navigator.kakaomobility.com/v1/directions?origin=${origin.lng},${origin.lat}&destination=${destination.lng},${destination.lat}&priority=RECOMMEND`;
+            const url = `https://apis-navi.kakaomobility.com/v1/directions?origin=${origin.lng},${origin.lat}&destination=${destination.lng},${destination.lat}&priority=RECOMMEND`;
             const res = await fetch(url, { headers: { 'Authorization': `KakaoAK ${KAKAO_REST_KEY}` } });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
