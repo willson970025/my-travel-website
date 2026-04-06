@@ -2337,11 +2337,12 @@
                     }
 
                     // 功能 B：目前定位 → 目標點（紫色實線）
-                    if (userLat !== null) {
-                        const userCoord = { lat: userLat, lng: userLng };
-                        bounds.extend(new kakao.maps.LatLng(userLat, userLng));
-                        drawRoute(userCoord, dest, '#5856D6', 'solid', 20).then(line => { pathLineUser = line; debounceFit(); });
-                    }
+                    
+                    //if (userLat !== null) {
+                    //    const userCoord = { lat: userLat, lng: userLng };
+                    //    bounds.extend(new kakao.maps.LatLng(userLat, userLng));
+                    //    drawRoute(userCoord, dest, '#5856D6', 'solid', 20).then(line => { pathLineUser = line; debounceFit(); });
+                    //}
 
                     let _fitTimer = null;
                     function debounceFit() { clearTimeout(_fitTimer); _fitTimer = setTimeout(() => map.setBounds(bounds), 200); }
